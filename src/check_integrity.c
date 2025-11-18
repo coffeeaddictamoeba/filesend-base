@@ -14,69 +14,13 @@
 #include <sodium/randombytes.h>
 #include <sodium/utils.h>
 
-#define RESET   "\033[0m"
-#define RED     "\033[31m"      // Errors
-#define YELLOW  "\033[33m"      // Warnings
-#define GREEN   "\033[32m"      // Success
-
-const char* KEY_DIR = "test/file_mac.key";
+#include "../include/key_utils.h"
 
 typedef struct {
     uint64_t size;
     uint64_t mtime;
     uint32_t pmode;
 } file_metadata_t;
-
-int load_key(const char* key_path, unsigned char* key, size_t key_len) {
-    int fd;
-    fd = open(key_path, O_RDONLY);
-    if (fd < 0) {
-        perror(RED "open key file (read)" RESET);
-        return -1;
-    }
-        
-    ssize_t n = read(fd, key, key_len);
-    close(fd);
-
-    if (n != (ssize_t)key_len) {
-        fputs(RED "[ERROR] Key file size mismatch\n" RESET, stderr);
-        return -1;
-    }
-
-    return 0;
-}
-
-int create_key(const char* key_path, unsigned char* key, size_t key_len) {
-    int fd;
-    fd = open(key_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (fd < 0) {
-        perror(RED "open key file (create)" RESET);
-        return -1;
-    }
-
-    randombytes_buf(key, key_len);
-
-    ssize_t n = write(fd, key, key_len);
-    if (n != (ssize_t)key_len) {
-        perror(RED "write key" RESET);
-        close(fd);
-        return -1;
-    }
-
-    if (fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
-        perror(RED "fchmod" RESET);
-        close(fd);
-        return -1;
-    }
-
-    close(fd);
-    return 0;
-}
-
-int load_or_create_key(const char* key_path, unsigned char* key, size_t key_len) {
-    struct stat st;
-    return (stat(key_path, &st) == 0) ? load_key(key_path, key, key_len) : create_key(key_path, key, key_len);
-}
 
 int hash_file_contents(crypto_generichash_state* state, const char* path) {
     FILE* f = fopen(path, "rb");
@@ -223,13 +167,13 @@ int save_mac_hex(const char* mac_path, const unsigned char *mac, size_t mac_len)
     return 0;
 }
 
-void usage(const char* prog) {
-    fprintf(stderr,
-        "Usage:\n"
-        "  %s sign   <file> <mac_file>\n"
-        "  %s verify <file> <mac_file>\n",
-        prog, prog);
-}
+// void usage(const char* prog) {
+//     fprintf(stderr,
+//         "Usage:\n"
+//         "  %s sign   <file> <mac_file>\n"
+//         "  %s verify <file> <mac_file>\n",
+//         prog, prog);
+// }
 
 int sign_file(const unsigned char* key, const char* file, const char* mac_file, unsigned char* mac, size_t mac_len) {
     if (find_file_mac(key, file, mac, mac_len) != 0) {
@@ -280,47 +224,47 @@ int verify_file(const unsigned char* key, const char* file, const char* mac_file
     }
 }
 
-int main(int argc, char** argv) {
-    if (argc < 3) {
-        usage(argv[0]);
-        return EXIT_FAILURE;
-    }
+// int main(int argc, char** argv) {
+//     if (argc < 3) {
+//         usage(argv[0]);
+//         return EXIT_FAILURE;
+//     }
 
-    if (sodium_init() < 0) {
-        fputs(
-            RED "[ERROR] sodium_init failed\n" RESET, 
-            stderr
-        );
-        return EXIT_FAILURE;
-    }
+//     if (sodium_init() < 0) {
+//         fputs(
+//             RED "[ERROR] sodium_init failed\n" RESET, 
+//             stderr
+//         );
+//         return EXIT_FAILURE;
+//     }
 
-    unsigned char key[crypto_generichash_KEYBYTES];
+//     unsigned char key[crypto_generichash_KEYBYTES];
 
-    if (load_or_create_key(KEY_DIR, key, sizeof(key)) != 0) {
-        fprintf(
-            stderr, 
-            RED "Failed to load/create key\n" RESET
-        );
-        return EXIT_FAILURE;
-    }
+//     if (load_or_create_key(KEY_DIR, key, sizeof(key)) != 0) {
+//         fprintf(
+//             stderr, 
+//             RED "Failed to load/create key\n" RESET
+//         );
+//         return EXIT_FAILURE;
+//     }
 
-    const char* mode = argv[1];
-    const char* file = argv[2];
+//     const char* mode = argv[1];
+//     const char* file = argv[2];
 
-    char* mac_file_temp = malloc(strlen(file)+4); 
-    if (argc == 4) {
-        mac_file_temp = argv[3];
-    } else {
-        strcpy(mac_file_temp, file);
-        strcat(mac_file_temp, ".mac");
-    }
-    const char* mac_file = mac_file_temp;
+//     char tmp_mac_file[1024];
+//     if (argc == 4) {
+//         snprintf(tmp_mac_file, sizeof(tmp_mac_file), "%s", argv[3]);
+//     } else {
+//         snprintf(tmp_mac_file, sizeof(tmp_mac_file), "%s.mac", tmp_mac_file);
+//     }
 
-    unsigned char mac[crypto_generichash_BYTES];
+//     const char* mac_file = tmp_mac_file;
 
-    if (strcmp(mode, "sign") == 0) {
-        return sign_file(key, file, mac_file, mac, sizeof(mac));
-    } else if (strcmp(mode, "verify") == 0) {
-        return verify_file(key, file, mac_file, mac, sizeof(mac));
-    }
-}
+//     unsigned char mac[crypto_generichash_BYTES];
+
+//     if (strcmp(mode, "sign") == 0) {
+//         return sign_file(key, file, mac_file, mac, sizeof(mac));
+//     } else if (strcmp(mode, "verify") == 0) {
+//         return verify_file(key, file, mac_file, mac, sizeof(mac));
+//     }
+// }
