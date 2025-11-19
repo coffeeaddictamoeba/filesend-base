@@ -21,7 +21,10 @@ int load_key(const char* key_path, unsigned char* key, size_t key_len) {
     close(fd);
 
     if (n != (ssize_t)key_len) {
-        fputs(RED "[ERROR] Key file size mismatch\n" RESET, stderr);
+        fprintf(
+            stderr, 
+            RED "[ERROR] Key file size mismatch\n" RESET
+        );
         return -1;
     }
 
@@ -57,9 +60,9 @@ int create_symmetric_key(const char* key_path, unsigned char* key, size_t key_le
     randombytes_buf(key, key_len);
 
     if (save_key(key_path, key, key_len) != 0) {
-        fputs(
-            RED "[ERROR] save_key failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] save_key failed\n" RESET
         );
         return -1;
     }
@@ -69,14 +72,17 @@ int create_symmetric_key(const char* key_path, unsigned char* key, size_t key_le
 
 int load_or_create_symmetric_key(const char* key_path, unsigned char* key, size_t key_len) {
     struct stat st;
-    return (stat(key_path, &st) == 0) ? load_key(key_path, key, key_len) : create_symmetric_key(key_path, key, key_len);
+    return (stat(key_path, &st) == 0) 
+        ? load_key(key_path, key, key_len) 
+        : create_symmetric_key(key_path, key, key_len);
 }
 
 int load_or_create_asymmetric_key_pair(const char* pub_key_path, unsigned char* pub_key, size_t pub_key_len) {
     struct stat pub_st;
     struct stat pr_st;
-    return (stat(pub_key_path, &pub_st) == 0) || (stat(PR_KEY_DIR, &pr_st) == 0) ? 
-        load_key(pub_key_path, pub_key, pub_key_len) : create_asymmetric_key_pair(pub_key_path, PR_KEY_DIR, pub_key, pub_key_len);
+    return (stat(pub_key_path, &pub_st) == 0) || (stat(PR_KEY_DIR, &pr_st) == 0) 
+        ? load_key(pub_key_path, pub_key, pub_key_len) 
+        : create_asymmetric_key_pair(pub_key_path, PR_KEY_DIR, pub_key, pub_key_len);
 }
 
 int create_asymmetric_key_pair(const char* pub_key_path, const char* pr_key_path, unsigned char* pub_key, size_t pub_key_len) {
@@ -103,17 +109,17 @@ int create_asymmetric_key_pair(const char* pub_key_path, const char* pr_key_path
 int create_sealed_key(unsigned char* file_key, size_t file_key_len, unsigned char* pub_key, unsigned char* sealed_key, size_t sealed_key_len, const char* sealed_key_path) {
     randombytes_buf(file_key, file_key_len);
     if (crypto_box_seal(sealed_key, file_key, file_key_len, pub_key) != 0) {
-        fputs(
-            RED "[ERROR] crypto_box_seal failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] crypto_box_seal failed\n" RESET
         );
         return -1;
     }
 
     if (save_key(sealed_key_path, sealed_key, sealed_key_len) != 0) {
-        fputs(
-            RED "[ERROR] save_key failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] save_key failed\n" RESET
         );
         return -1;
     }

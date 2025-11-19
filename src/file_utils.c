@@ -17,12 +17,6 @@
 #include "../include/key_utils.h"
 #include "../include/file_utils.h"
 
-typedef struct {
-    uint64_t size;
-    uint64_t mtime;
-    uint32_t pmode;
-} file_metadata_t;
-
 int hash_file_contents(crypto_generichash_state* state, const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) {
@@ -34,9 +28,9 @@ int hash_file_contents(crypto_generichash_state* state, const char* path) {
     size_t n;
     while((n = fread(buf, 1, sizeof(buf), f)) > 0) {
         if (crypto_generichash_update(state, buf, (unsigned long long)n) != 0) {
-            fputs(
-                RED "[ERROR] crypto_generichash_update failed\n" RESET, 
-                stderr
+            fprintf(
+                stderr,
+                RED "[ERROR] crypto_generichash_update failed\n" RESET 
             );
             fclose(f);
             return -1;
@@ -73,9 +67,9 @@ int create_file_mac(const unsigned char *key, const char* path, unsigned char* m
 
     crypto_generichash_state state;
     if (crypto_generichash_init(&state, key, sizeof(key), mac_len) != 0) {
-        fputs(
-            RED "[ERROR] crypto_generichash_init failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] crypto_generichash_init failed\n" RESET
         );
         return -1;
     }
@@ -83,17 +77,17 @@ int create_file_mac(const unsigned char *key, const char* path, unsigned char* m
     if (hash_file_contents(&state, path) != 0) return -1;
 
     if (crypto_generichash_update(&state, (const unsigned char*)&fmd, sizeof(fmd)) != 0) {
-        fputs(
-            RED "[ERROR] crypto_generichash_update metadata failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] crypto_generichash_update metadata failed\n" RESET
         );
         return -1;
     }
 
     if (crypto_generichash_final(&state, mac, mac_len) != 0) {
-        fputs(
-            RED "[ERROR] crypto_generichash_final failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] crypto_generichash_final failed\n" RESET
         );
         return -1;
     }
@@ -120,9 +114,9 @@ int load_file_mac(const char* mac_path, unsigned char* mac, size_t mac_len) {
 
     size_t mac_read_len = 0;
     if (sodium_hex2bin(mac, mac_len, hex, len, NULL, &mac_read_len, NULL) != 0) {
-        fputs(
-            RED "[ERROR] sodium_hex2bin failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] sodium_hex2bin failed\n" RESET
         );
         return -1;
     }
@@ -147,9 +141,9 @@ int save_file_mac(const char* mac_path, const unsigned char *mac, size_t mac_len
 
     char *hex = sodium_malloc(mac_len*2+1);
     if (!hex) {
-        fputs(
-            RED "[ERROR] sodium_malloc failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] sodium_malloc failed\n" RESET
         );
         return -1;
     }
@@ -158,8 +152,7 @@ int save_file_mac(const char* mac_path, const unsigned char *mac, size_t mac_len
 
     fprintf(
         f,
-        "%s\n",
-        hex
+        "%s\n", hex
     );
 
     sodium_free(hex);
@@ -171,17 +164,17 @@ int save_file_mac(const char* mac_path, const unsigned char *mac, size_t mac_len
 // Sign file for integrity check
 int sign_file(const unsigned char* key, const char* file, const char* mac_file, unsigned char* mac, size_t mac_len) {
     if (create_file_mac(key, file, mac, mac_len) != 0) {
-        fputs(
-            RED "[ERROR] Failed to find MAC\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] Failed to find MAC\n" RESET
         );
         return -1;
     }
 
     if (save_file_mac(mac_file, mac, mac_len) != 0) {
-        fputs(
-            RED "[ERROR] Failed to save MAC hex\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] Failed to save MAC hex\n" RESET
         );
         return -1;
     }
@@ -193,19 +186,18 @@ int sign_file(const unsigned char* key, const char* file, const char* mac_file, 
 // Verify file integrity
 int verify_file(const unsigned char* key, const char* file, const char* mac_file, unsigned char* mac, size_t mac_len) {
     unsigned char stored_mac[crypto_generichash_BYTES];
-
     if (load_file_mac(mac_file, stored_mac, sizeof(stored_mac)) != 0) {
-        fputs(
-            RED "[ERROR] Failed to load stored MAC\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] Failed to load stored MAC\n" RESET
         );
         return -1;
     }
 
     if (create_file_mac(key, file, mac, mac_len) != 0) {
-        fputs(
-            RED "[ERROR] Failed to find MAC\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] Failed to find MAC\n" RESET
         );
         return -1;
     }
@@ -239,9 +231,9 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
 
     file_metadata_t md;
     if (get_file_metadata(plain_path, &md) != 0) {
-        fputs(
-            RED "[ERROR] Failed to get file metadata\n" RESET,
-            stderr 
+        fprintf(
+            stderr,
+            RED "[ERROR] Failed to get file metadata\n" RESET
         );
         return -1;
     }
@@ -250,9 +242,9 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
     unsigned char header[crypto_secretstream_xchacha20poly1305_HEADERBYTES];
     
     if (crypto_secretstream_xchacha20poly1305_init_push(&st, header, key) != 0) {
-        fputs(
-            RED "[ERROR] crypto_secretstream_xchacha20poly1305_init_push failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] crypto_secretstream_xchacha20poly1305_init_push failed\n" RESET
         );
         fclose(fin);
         fclose(fout);
@@ -260,9 +252,9 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
     }
 
     if (fwrite(header, 1, sizeof(header), fout) != sizeof(header)) {
-        fputs(
-            RED "[ERROR] Failed to write header\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] Failed to write header\n" RESET
         );
         fclose(fin);
         fclose(fout);
@@ -285,9 +277,9 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
         unsigned long long out_len = 0;
 
         if(crypto_secretstream_xchacha20poly1305_push(&st, outbuf, &out_len, inbuf, n, NULL, 0, tag) != 0) {
-            fputs(
-                RED "[ERROR] secretstream_push failed\n" RESET,
-                stderr
+            fprintf(
+                stderr,
+                RED "[ERROR] secretstream_push failed\n" RESET
             );
             fclose(fin);
             fclose(fout);
@@ -295,9 +287,9 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
         }
 
         if (fwrite(outbuf, 1, out_len, fout) != out_len) {
-            fputs(
-                RED "[ERROR] Failed to write encrypted chunk\n" RESET,
-                stderr
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to write encrypted chunk\n" RESET
             );
             fclose(fin);
             fclose(fout);
@@ -340,9 +332,9 @@ int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const
 
     file_metadata_t md;
     if (get_file_metadata(enc_path, &md) != 0) {
-        fputs(
-            RED "[ERROR] Failed to get file metadata\n" RESET,
-            stderr 
+        fprintf(
+            stderr,
+            RED "[ERROR] Failed to get file metadata\n" RESET
         );
         return -1;
     }
@@ -352,7 +344,7 @@ int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const
 
     if (fread(header, 1, sizeof(header), fin) != crypto_secretstream_xchacha20poly1305_HEADERBYTES) {
         if (feof(fin)) {
-            fputs(RED "[ERROR] Encrypted file is too short\n" RESET, stderr);
+            fprintf(stderr, RED "[ERROR] Encrypted file is too short\n" RESET);
         } else {
             perror(RED "fread of header in decrypt file" RESET);
         }
@@ -362,9 +354,9 @@ int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const
     }
 
     if (crypto_secretstream_xchacha20poly1305_init_pull(&st, header, key) != 0) {
-        fputs(
-            RED "[ERROR] crypto_secretstream_xchacha20poly1305_init_pull failed\n" RESET,
-            stderr
+        fprintf(
+            stderr,
+            RED "[ERROR] crypto_secretstream_xchacha20poly1305_init_pull failed\n" RESET
         );
         fclose(fin);
         fclose(fout);
@@ -387,9 +379,9 @@ int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const
         unsigned long long out_len = 0;
 
         if (crypto_secretstream_xchacha20poly1305_pull(&st, outbuf, &out_len, &tag, inbuf, n, NULL, 0) != 0) {
-            fputs(
-                RED "[ERROR] secretstream_pull failed\n" RESET,
-                stderr
+            fprintf(
+                stderr,
+                RED "[ERROR] secretstream_pull failed\n" RESET
             );
             fclose(fin);
             fclose(fout);
@@ -397,9 +389,9 @@ int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const
         }
 
         if (fwrite(outbuf, 1, out_len, fout) != out_len) {
-            fputs(
-                RED "[ERROR] Failed to write encrypted chunk\n" RESET,
-                stderr 
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to write encrypted chunk\n" RESET
             );
             fclose(fin);
             fclose(fout);

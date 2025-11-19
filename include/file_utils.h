@@ -7,6 +7,20 @@
 
 #define CHUNK_SIZE  4096
 
+typedef struct {
+    int on_all;
+    char* init_file;
+    char* mode;
+    char* key_mode;
+    char* private_key_path;
+} key_mode_config_t;
+
+typedef struct {
+    uint64_t size;
+    uint64_t mtime;
+    uint32_t pmode;
+} file_metadata_t;
+
 int sign_file(const unsigned char* key, const char* file, const char* mac_file, unsigned char* mac, size_t mac_len);
 int verify_file(const unsigned char* key, const char* file, const char* mac_file, unsigned char* mac, size_t mac_len);
 int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const char* dec_path);
