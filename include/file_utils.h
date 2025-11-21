@@ -13,6 +13,7 @@ typedef struct {
     char* init_file;
     char* dest_file;
     char* mode;
+    char* submode;
     char* key_mode;
     char* sym_key_path;      // symmetric
     char* private_key_path;  // asymmetric

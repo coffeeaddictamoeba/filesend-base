@@ -212,6 +212,7 @@ int verify_file(const unsigned char* key, const char* file, const char* mac_file
 }
 
 // Encrypt file data with symmetric key + automatic integrity check of file contents
+// TODO: add enc_all option
 int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, const char* enc_path) {
     FILE* fin = fopen(plain_path, "rb");
     if (!fin) {
@@ -307,12 +308,13 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
         return -1;
     }
 
-    printf(GREEN "[SUCCESS] File %s was successfully encrypted\n" RESET, enc_path);
+    printf(GREEN "[SUCCESS] File %s was successfully encrypted (symmetric)\n" RESET, enc_path);
 
     return 0;
 }
 
 // Decrypt file data with symmetric key + automatic integrity check of file contents
+// TODO: add dec_all option
 int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const char* dec_path) {
     FILE* fin = fopen(enc_path, "rb");
     if (!fin) {
@@ -409,7 +411,7 @@ int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const
         return -1;
     }
 
-    printf(GREEN "[SUCCESS] File %s was successfully decrypted\n" RESET, dec_path);
+    printf(GREEN "[SUCCESS] File %s was successfully decrypted (symmetric)\n" RESET, dec_path);
 
     return 0;
 }
@@ -559,9 +561,9 @@ int encrypt_file_asymmetric(const unsigned char* pub_key, const char* plain_path
     }
 
     if (enc_all) {
-        printf(GREEN "[SUCCESS] File %s and its metadata were successfully encrypted\n" RESET, enc_path);
+        printf(GREEN "[SUCCESS] File %s and its metadata were successfully encrypted (asymmetric)\n" RESET, enc_path);
     } else {
-        printf(GREEN "[SUCCESS] File %s was successfully encrypted (content only)\n" RESET, enc_path);
+        printf(GREEN "[SUCCESS] File %s was successfully encrypted (content only + assymetric)\n" RESET, enc_path);
     }
 
     return 0;
@@ -727,9 +729,9 @@ int decrypt_file_asymmetric(const unsigned char* pub_key, const unsigned char* p
     }
 
     if (dec_all) {
-        printf(GREEN "[SUCCESS] File %s and its metadata were successfully decrypted\n" RESET, dec_path);
+        printf(GREEN "[SUCCESS] File %s and its metadata were successfully decrypted (asymmetric)\n" RESET, dec_path);
     } else {
-        printf(GREEN "[SUCCESS] File %s was successfully decrypted (content only)\n" RESET, dec_path);
+        printf(GREEN "[SUCCESS] File %s was successfully decrypted (content only + asymmetric)\n" RESET, dec_path);
     }
 
     return 0;

@@ -21,7 +21,7 @@ void usage(const char* prog) {
     fprintf(
         stderr,
         "Usage:\n"
-        "  %s send    <file> <url>\n"
+        "  %s send    <file> <url> [--encrypt symmetric|asymmetric][--all]\n"
         "  %s encrypt <file> [--symmetric|--asymmetric][--all][--dest <file>]\n"
         "  %s decrypt <file> [--symmetric|--asymmetric][--all][--dest <file>]\n",
         prog, prog, prog
@@ -33,24 +33,38 @@ int parse_args(int argc, char** argv, key_mode_config_t* cf) {
     cf->mode = argv[1];
     cf->init_file = argv[2];
 
+    cf->public_key_path = getenv(PUB_KEY_ENV);
+    cf->private_key_path = getenv(PR_KEY_ENV);
+    cf->sym_key_path = getenv(SYM_KEY_ENV);
+    cf->cert_path = getenv(CERT_PATH_ENV);
+
     if (strcmp(cf->mode, "send") == 0) { // sending a file
         cf->url = argv[3];
-        cf->cert_path = getenv(CERT_PATH_ENV);
-    } else { // encrypting/decrypting a file
-        cf->key_mode = argv[3];
-        int is_symmetric = (strcmp(cf->mode, "--symmetric") == 0);
 
-        if (is_symmetric) cf->sym_key_path = getenv(SYM_KEY_ENV);
-        else {
-            cf->public_key_path = getenv(PUB_KEY_ENV);
-            cf->private_key_path = getenv(PR_KEY_ENV);
-            if (cf->public_key_path == NULL || cf->private_key_path == NULL) {
-                fprintf(
-                    stdout, 
-                    YELLOW "[WARN] Paths for asymmetric keys are empty\n" RESET
-                );
+        if (argc > 4) {
+            cf->submode = argv[4];
+            cf->key_mode = argv[5];
+
+            // Specific/optional args
+            for (int i = 6; i < argc; i++) {
+                const char* arg = argv[i];
+                
+                if (strcmp(arg, "--all") == 0) cf->on_all = 1;
+
+                // More options can be added later
+                    
+                else {
+                    fprintf(
+                        stderr, 
+                        "[ERROR] Unknown arguments\n"
+                    );
+                    return -1;
+                }
             }
         }
+        
+    } else { // encrypting/decrypting a file
+        cf->key_mode = argv[3];
 
         // Specific/optional args
         for (int i = 4; i < argc; i++) {
@@ -61,7 +75,7 @@ int parse_args(int argc, char** argv, key_mode_config_t* cf) {
                 cf->dest_file = argv[++i];
 
             // More options can be added later
-            
+                
             else {
                 fprintf(
                     stderr, 
@@ -95,7 +109,18 @@ int main(int argc, char** argv) {
     }
     
     if (strcmp(cf.mode, "send") == 0) {
-        return send_encrypted_file(cf.url, cf.init_file, cf.cert_path) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        if (strcmp(cf.submode, "--encrypt") == 0) {
+            const char* key_path = (strcmp(cf.key_mode, "symmetric") == 0) ? cf.sym_key_path : cf.public_key_path;
+            return send_encrypted_file(
+                cf.url, 
+                cf.init_file, 
+                cf.cert_path, 
+                key_path, 
+                cf.key_mode, 
+                cf.on_all) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+        
+        return send_file(cf.url, cf.init_file, cf.cert_path) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     // Symmetric key mode

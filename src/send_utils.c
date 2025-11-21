@@ -1,6 +1,11 @@
 #include <curl/curl.h>
+#include <sodium/crypto_box.h>
+#include <sodium/crypto_secretstream_xchacha20poly1305.h>
+#include <string.h>
 
-int send_encrypted_file(const char* url, const char* enc_path, const char* cert) {
+#include "../include/file_utils.h"
+
+int send_file(const char* url, const char* file_path, const char* cert) {
     CURL *curl = NULL;
     CURLcode res;
     int ret = 0;
@@ -15,8 +20,8 @@ int send_encrypted_file(const char* url, const char* enc_path, const char* cert)
     curl_mime *mime = curl_mime_init(curl);
     curl_mimepart *part = curl_mime_addpart(mime);
 
-    curl_mime_name(part, "file");            // field name
-    curl_mime_filedata(part, enc_path);  // path to encrypted file
+    curl_mime_name(part, "file");             // field name
+    curl_mime_filedata(part, file_path);  // path to file
 
     // Optionally send device ID or metadata
     curl_mimepart *dev = curl_mime_addpart(mime);
@@ -55,4 +60,59 @@ int send_encrypted_file(const char* url, const char* enc_path, const char* cert)
 
     return ret;
 }
+
+int send_encrypted_file(const char* url, const char* file_path, const char* cert, const char* key_path, const char* key_mode, int enc_all) {
+    // Symmetric key mode
+    if (strcmp(key_mode, "symmetric") == 0) {
+        const char* p = (key_path == NULL) ? DEFAULT_SYM_KEY_PATH : key_path;
+
+        unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
+        if (load_or_create_symmetric_key(p, key, sizeof(key)) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to create symmetric key\n" RESET
+            );
+            return -1;
+        }
+
+        if (encrypt_file_symmetric(key, file_path, file_path) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to encrypt the file: %s (symmetric encryption)\n" RESET, file_path
+            );
+            return -1;
+        }
+
+        return send_file(url, file_path, cert);
+    }
+
+    // Asymmetric key mode (public/private key)
+    else if (strcmp(key_mode, "asymmetric") == 0) {
+
+        const char* pub = (key_path == NULL) ? DEFAULT_PUB_KEY_PATH : key_path;
+        const char* pr = DEFAULT_SYM_KEY_PATH;    // safeguard for create
+
+        unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
+        if (load_or_create_asymmetric_key_pair(pub, pr, pub_key, sizeof(pub_key)) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to create asymmetric key\n" RESET
+            );
+            return -1;
+        }
+            
+        if (encrypt_file_asymmetric(pub_key, file_path, file_path, enc_all) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to encrypt the file: %s (asymmetric encryption)\n" RESET, file_path
+            );
+            return -1;
+        }
+
+        return send_file(url, file_path, cert);
+    }
+
+    return -1; // should not reach
+}
+
 
