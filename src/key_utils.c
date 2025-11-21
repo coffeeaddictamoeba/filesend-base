@@ -77,12 +77,12 @@ int load_or_create_symmetric_key(const char* key_path, unsigned char* key, size_
         : create_symmetric_key(key_path, key, key_len);
 }
 
-int load_or_create_asymmetric_key_pair(const char* pub_key_path, unsigned char* pub_key, size_t pub_key_len) {
+int load_or_create_asymmetric_key_pair(const char* pub_key_path, const char* pr_key_path, unsigned char* pub_key, size_t pub_key_len) {
     struct stat pub_st;
     struct stat pr_st;
-    return (stat(pub_key_path, &pub_st) == 0) || (stat(PR_KEY_DIR, &pr_st) == 0) 
+    return (stat(pub_key_path, &pub_st) == 0) || (stat(pr_key_path, &pr_st) == 0) 
         ? load_key(pub_key_path, pub_key, pub_key_len) 
-        : create_asymmetric_key_pair(pub_key_path, PR_KEY_DIR, pub_key, pub_key_len);
+        : create_asymmetric_key_pair(pub_key_path, pr_key_path, pub_key, pub_key_len);
 }
 
 int create_asymmetric_key_pair(const char* pub_key_path, const char* pr_key_path, unsigned char* pub_key, size_t pub_key_len) {

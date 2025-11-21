@@ -4,15 +4,19 @@
 #include <sodium/crypto_secretstream_xchacha20poly1305.h>
 
 #include "ui_utils.h"
+#include "key_utils.h"
 
 #define CHUNK_SIZE  4096
 
 typedef struct {
     int on_all;
     char* init_file;
+    char* dest_file;
     char* mode;
     char* key_mode;
-    char* private_key_path;
+    char* sym_key_path;      // symmetric
+    char* private_key_path;  // asymmetric
+    char* public_key_path ;  // asymmetric
 } key_mode_config_t;
 
 typedef struct {

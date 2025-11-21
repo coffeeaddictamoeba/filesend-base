@@ -1,13 +1,13 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -O2 -Iinclude 
-LDFLAGS=-lsodium
+LDFLAGS=-lsodium -lcurl
 BUILD_DIR = bin
 OBJ_DIR = obj
 SRC_DIR = src
 
 SOURCES = $(wildcard $(SRC_DIR)/*.c)
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
-EXECUTABLE = $(BUILD_DIR)/file_encrypt
+EXECUTABLE = $(BUILD_DIR)/filesend
 
 all: $(EXECUTABLE)
 
