@@ -6,8 +6,7 @@
 #define DEFAULT_SYM_KEY_PATH "sym_key.bin"
 #define DEFAULT_PR_KEY_PATH  "pr_key.bin"
 #define DEFAULT_PUB_KEY_PATH "pub_key.bin"
-#define DEFAULT_CA_KEY_PATH  "ca.key"
-#define DEFAULT_CA_CERT_PATH "ca_cert.key"
+#define DEFAULT_CA_CERT_PATH "ca_cert.pem"
 
 int load_key(const char* key_path, unsigned char* key, size_t key_len);
 

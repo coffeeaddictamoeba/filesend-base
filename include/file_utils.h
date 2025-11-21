@@ -17,6 +17,8 @@ typedef struct {
     char* sym_key_path;      // symmetric
     char* private_key_path;  // asymmetric
     char* public_key_path ;  // asymmetric
+    char* url;
+    char* cert_path;
 } key_mode_config_t;
 
 typedef struct {
