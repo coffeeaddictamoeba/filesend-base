@@ -1,2 +1,170 @@
 # filesend-base
+
 This code provides basic tools for fast, lightweight and secure file sending from one device to another
+
+### General Syntax
+
+---
+
+```
+filesend send    <file> <url> [--encrypt symmetric|asymmetric] [--all]
+filesend encrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>]
+filesend decrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>]
+```
+
+#### Mode: `send`
+
+---
+
+Sends a file to a remote HTTPS server.
+
+You may choose whether to encrypt the file before sending it.
+
+```
+filesend send <file> <url> [--encrypt symmetric|asymmetric] [--all]
+```
+
+**Parameters**
+
+* **`<file>`** – path to the file you want to send
+* **`<url>`** – full server URL (must include `/upload`)
+
+  Example: `https://myserver.local:8443/upload`
+* **`--encrypt symmetric`** – encrypt using libsodium symmetric key
+* **`--encrypt asymmetric`** – encrypt using libsodium sealed box (public key)
+* **`--all`** – encrypt file **metadata** as well as contents
+
+**Environment variables**
+
+`CERT_PATH` – path to CA certificate used to validate server TLS certificate
+
+`SYM_KEY_PATH` – path to symmetric key (if symmetric mode is chosen)
+
+`PUB_KEY_PATH`, `PR_KEY_PATH` – paths to public/private key pair (asymmetric mode)
+
+**Examples**
+
+- Send a file **without** encrypting it: `filesend send data/report.bin "https://myserver.local:8443/upload"`
+- Send with symmetric encryption:
+
+```
+export SYM_KEY_PATH=/etc/myapp/sym.key
+export CERT_PATH=/etc/myapp/ca_cert.pem
+
+filesend send images/photo.png "https://myserver.local:8443/upload" \
+    --encrypt symmetric
+```
+
+- Send with asymmetric encryption and metadata protection:
+
+```
+export PUB_KEY_PATH=/etc/myapp/server_box_pk.bin
+export CERT_PATH=/etc/myapp/ca_cert.pem
+
+filesend send logs/system.log "https://myserver.local:8443/upload" \
+    --encrypt asymmetric --all
+```
+
+#### Mode: `encrypt`
+
+---
+
+Encrypts a file locally.
+
+```
+filesend encrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>]
+```
+
+Arguments
+
+* **`--asymmetric`** – use sealed box with public key
+* **`--symmetric`** – use symmetric key
+* **`--dest <file>`** – custom output path
+* **`--all`** – encrypt metadata too
+
+- Asymmetric encryption with metadata (The encrypted output will default to `raw/data.bin`):
+
+```
+export PUB_KEY_PATH=/etc/myapp/server_box_pk.bin
+filesend encrypt raw/data.bin --asymmetric --all
+```
+
+- Symmetric encryption:
+
+```
+export PUB_KEY_PATH=/etc/myapp/server_box_pk.bin
+filesend encrypt raw/data.bin --symmetric --all
+```
+
+#### Mode: `decrypt`
+
+---
+
+Decrypts a file previously encrypted with `filesend`.
+
+```
+filesend decrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>]
+```
+
+Arguments:
+
+* **`--symmetric`** – decrypt with symmetric key
+* **`--asymmetric`** – decrypt with private key
+* **`--dest <file>`** – output path for decrypted file
+* **`--all`** – restore metadata and validate integrity
+
+Required environment variables (depending on mode):
+
+* `SYM_KEY_PATH` – for symmetric decrypt
+* `PUB_KEY_PATH`, `PR_KEY_PATH` – for asymmetric decrypt
+
+Examples:
+
+- Decrypt symmetric file:
+
+```
+export SYM_KEY_PATH=/etc/myapp/sym.key
+
+filesend decrypt backups/db.enc \
+    --symmetric --dest db_restored.sql
+```
+
+- Decrypt asymmetric encrypted file with metadata
+
+```
+export PUB_KEY_PATH=/etc/myapp/server_box_pk.bin
+export PR_KEY_PATH=/etc/myapp/server_box_sk.bin
+
+filesend decrypt images/cam01.img.enc \
+    --asymmetric --all
+```
+
+### Notes & Recommendations
+
+* `--all` enables encryption/decryption of **metadata** (mtime, mode, uid/gid).
+* URL  **must include `/upload`** , as the server expects this endpoint.
+* The hostname in the URL must match the certificate CN/SAN (e.g., `Test`, `localhost`).
+* CA certificate for TLS validation must be given via `CERT_PATH`.
+* Server *private key* **must never** be on the sending device – only the server should have it.
+* Asymmetric encryption is recommended for device - server communication (one-way encryption).
+* Symmetric encryption is recommended for local file storage or local pipelines.
+
+#### How to generate server key and certificate
+
+---
+
+```
+# CA private key
+openssl genrsa -out myCA.key 4096
+
+# CA self-signed certificate (root cert)
+openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 -out ca_cert.pem
+
+# Create a key
+openssl genrsa -out server.key 2048
+openssl req -new -key server.key -out server.csr
+
+# Sign
+openssl x509 -req -in server.csr -CA ca_cert.pem -CAkey ca.key \
+   -CAcreateserial -out server.crt -days 365 -sha256
+```
