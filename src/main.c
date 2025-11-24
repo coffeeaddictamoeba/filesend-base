@@ -21,7 +21,7 @@ void usage(const char* prog) {
     fprintf(
         stderr,
         "Usage:\n"
-        "  %s send    <path> <url> "
+        "  %s send  [--https|--ws]  <path> <url> "
         "[--encrypt symmetric|asymmetric] [--all] [--timeout <n>]\n"
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
         "[--dest <file>] [--timeout <n>]\n"
@@ -40,7 +40,6 @@ int parse_args(int argc, char** argv, key_mode_config_t* cf) {
     memset(cf, 0, sizeof(*cf));
 
     cf->mode      = argv[1];
-    cf->init_path = argv[2];
     cf->timeout_secs = 0;   // default: no monitoring
 
     // envs
@@ -59,9 +58,11 @@ int parse_args(int argc, char** argv, key_mode_config_t* cf) {
             return -1;
         }
 
-        cf->url = argv[3];
+        cf->use_ws = (strcmp(argv[2], "--ws") == 0);
+        cf->init_path = argv[3];
+        cf->url = argv[4];
 
-        for (int i = 4; i < argc; ++i) {
+        for (int i = 5; i < argc; ++i) {
             const char *arg = argv[i];
 
             if (strcmp(arg, "--encrypt") == 0) {
@@ -105,6 +106,7 @@ int parse_args(int argc, char** argv, key_mode_config_t* cf) {
         }
 
     } else if (strcmp(cf->mode, "encrypt") == 0 || strcmp(cf->mode, "decrypt") == 0) {
+        cf->init_path = argv[2];
 
         for (int i = 3; i < argc; ++i) {
             const char *arg = argv[i];
@@ -209,7 +211,7 @@ int main(int argc, char** argv) {
 
         int ret = monitor_path(cf.init_path, cf.timeout_secs, send_file_callback, &sctx);
 
-        if (ret == 0 && cf.timeout_secs > 0) send_end_signal(curl, cf.url, cf.cert_path);
+        if (ret == 0 && cf.timeout_secs > 0 && !cf.use_ws) send_end_signal_via_https(curl, cf.url, cf.cert_path);
 
         curl_easy_cleanup(curl);
         return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -253,10 +255,11 @@ int main(int argc, char** argv) {
 
         if (!actx.is_decrypt) {
             // ENCRYPT: only need pub_key
-            if (load_or_create_asymmetric_key_pair(cf.public_key_path,
-                                                   cf.private_key_path,
-                                                   actx.pub_key,
-                                                   sizeof(actx.pub_key)) != 0) {
+            if (load_or_create_asymmetric_key_pair(
+                cf.public_key_path,
+                cf.private_key_path,
+                actx.pub_key,
+                sizeof(actx.pub_key)) != 0) {
                 fprintf(
                     stderr,
                     RED "[ERROR] Failed to create/load asymmetric key\n" RESET

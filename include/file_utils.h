@@ -18,6 +18,7 @@ typedef struct {
     char *key_mode;      // "symmetric" / "asymmetric" or NULL
     int   on_all;        // metadata flag
     int   timeout_secs;  // 0 = no monitoring, >0 = watch dir
+    int   use_ws;        // 0 = use https, >0 = use websocket
 
     char *public_key_path;
     char *private_key_path;

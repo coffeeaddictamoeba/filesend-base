@@ -131,22 +131,41 @@ int send_file_callback(const char *file_path, void *ctx_void) {
     send_ctx_t *ctx = (send_ctx_t*)ctx_void;
     key_mode_config_t *cf = ctx->cf;
 
-    if (!cf->key_mode) return send_file(ctx->curl, cf->url, file_path, cf->cert_path);
+    if (!cf->use_ws) {
+        if (!cf->key_mode) return send_file_via_https(ctx->curl, cf->url, file_path, cf->cert_path);
 
-    // key_mode is "symmetric" or "asymmetric"
-    const char *key_path = NULL;
-    if (strcmp(cf->key_mode, "symmetric") == 0) 
-        key_path = cf->sym_key_path;
-    else key_path = cf->public_key_path;
+        // key_mode is "symmetric" or "asymmetric"
+        const char *key_path = NULL;
+        if (strcmp(cf->key_mode, "symmetric") == 0) 
+            key_path = cf->sym_key_path;
+        else key_path = cf->public_key_path;
 
-    return send_encrypted_file(ctx->curl,
-                               cf->url,
-                               file_path,
-                               cf->cert_path,
-                               key_path,
-                               cf->key_mode,
-                               cf->on_all
-                            );
+        return send_encrypted_file_via_https(
+            ctx->curl,
+            cf->url,
+            file_path,
+            cf->cert_path,
+            key_path,
+            cf->key_mode,
+            cf->on_all
+        );
+    } else {
+        if (!cf->key_mode) return send_file_via_ws(ctx->cf->url, file_path);
+        
+        // key_mode is "symmetric" or "asymmetric"
+        const char *key_path = NULL;
+        if (strcmp(cf->key_mode, "symmetric") == 0) 
+            key_path = cf->sym_key_path;
+        else key_path = cf->public_key_path;
+
+        return send_encrypted_file_via_ws(
+            cf->url,
+            file_path,
+            key_path,
+            cf->key_mode,
+            cf->on_all
+        );
+    }
 }
 
 // For encrypt/decrypt with symmetric key

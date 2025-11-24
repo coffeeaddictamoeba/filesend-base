@@ -2,6 +2,7 @@
 #include <curl/curl.h>
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_secretstream_xchacha20poly1305.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -9,7 +10,7 @@
 #include "../include/key_utils.h"
 #include "../include/send_utils.h"
 
-int send_file(CURL* curl, const char* url, const char* file_path, const char* cert) {
+int send_file_via_https(CURL* curl, const char* url, const char* file_path, const char* cert) {
     CURLcode res;
     int ret = 0;
 
@@ -62,7 +63,7 @@ int send_file(CURL* curl, const char* url, const char* file_path, const char* ce
     return ret;
 }
 
-int send_encrypted_file(CURL* curl, const char* url, const char* file_path, const char* cert, const char* key_path, const char* key_mode, int enc_all) {
+int send_encrypted_file_via_https(CURL* curl, const char* url, const char* file_path, const char* cert, const char* key_path, const char* key_mode, int enc_all) {
     // Symmetric key mode
     if (strcmp(key_mode, "symmetric") == 0) {
         const char* p = (key_path == NULL) ? DEFAULT_SYM_KEY_PATH : key_path;
@@ -84,7 +85,7 @@ int send_encrypted_file(CURL* curl, const char* url, const char* file_path, cons
             return -1;
         }
 
-        return send_file(curl, url, file_path, cert);
+        return send_file_via_https(curl, url, file_path, cert);
     }
 
     // Asymmetric key mode (public/private key)
@@ -109,14 +110,14 @@ int send_encrypted_file(CURL* curl, const char* url, const char* file_path, cons
             return -1;
         }
 
-        return send_file(curl, url, file_path, cert);
+        return send_file_via_https(curl, url, file_path, cert);
     }
 
     return -1; // should not reach
 }
 
 // signal server that sending ended (no more files)
-int send_end_signal(CURL *curl, const char *url, const char *cert) {
+int send_end_signal_via_https(CURL *curl, const char *url, const char *cert) {
     CURLcode res;
     int ret = 0;
 
@@ -144,16 +145,90 @@ int send_end_signal(CURL *curl, const char *url, const char *cert) {
     if (res != CURLE_OK) {
         fprintf(
             stderr,
-            "[WARN] send_end_signal failed: %s\n", curl_easy_strerror(res)
+            YELLOW "[WARN] send_end_signal failed: %s\n" RESET, curl_easy_strerror(res)
         );
         ret = -1;
     } else {
         fprintf(
-            stderr, 
-            "[SUCCESS] Sent end-of-stream signal to server\n"
+            stdout, 
+            GREEN "[SUCCESS] Sent end-of-stream signal to server\n" RESET
         );
     }
 
     curl_mime_free(mime);
     return ret;
+}
+
+int send_file_via_ws(const char *ws_url, const char *file_path) {
+    char cmd[2048];
+
+    snprintf(
+        cmd, 
+        sizeof(cmd),
+        "python3 examples/send_ws.py '%s' '%s'", ws_url, file_path
+    );
+
+    int rc = system(cmd);
+    if (rc != 0) {
+        fprintf(
+            stderr, 
+            RED "[ERROR] send_ws.py failed, rc=%d\n" RESET, rc
+        );
+        return -1;
+    }
+
+    return 0;
+}
+
+int send_encrypted_file_via_ws(const char* ws_url, const char* file_path, const char* key_path, const char* key_mode, int enc_all) {
+    // Symmetric key mode
+    if (strcmp(key_mode, "symmetric") == 0) {
+        const char* p = (key_path == NULL) ? DEFAULT_SYM_KEY_PATH : key_path;
+
+        unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
+        if (load_or_create_symmetric_key(p, key, sizeof(key)) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to create symmetric key\n" RESET
+            );
+            return -1;
+        }
+
+        if (encrypt_file_symmetric(key, file_path, file_path) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to encrypt the file: %s (symmetric encryption)\n" RESET, file_path
+            );
+            return -1;
+        }
+
+        return send_file_via_ws(ws_url, file_path);
+    }
+
+    // Asymmetric key mode (public/private key)
+    else if (strcmp(key_mode, "asymmetric") == 0) {
+        const char* pub = (key_path == NULL) ? DEFAULT_PUB_KEY_PATH : key_path;
+        const char* pr  = DEFAULT_SYM_KEY_PATH;  // placeholder for creation
+
+        unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
+        if (load_or_create_asymmetric_key_pair(pub, pr, pub_key, sizeof(pub_key)) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to create asymmetric key\n" RESET
+            );
+            return -1;
+        }
+
+        if (encrypt_file_asymmetric(pub_key, file_path, file_path, enc_all) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to encrypt the file: %s (asymmetric encryption)\n" RESET, file_path
+            );
+            return -1;
+        }
+
+        return send_file_via_ws(ws_url, file_path);
+    }
+
+    return -1; // should not reach
 }
