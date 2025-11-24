@@ -9,17 +9,20 @@
 #define CHUNK_SIZE  4096
 
 typedef struct {
-    int on_all;
-    char* init_file;
-    char* dest_file;
-    char* mode;
-    char* submode;
-    char* key_mode;
-    char* sym_key_path;      // symmetric
-    char* private_key_path;  // asymmetric
-    char* public_key_path ;  // asymmetric
-    char* url;
-    char* cert_path;
+    char *mode;          // "send" / "encrypt" / "decrypt"
+    char *init_path;     // file or directory
+    char *dest_path;     // for encrypt/decrypt (file or dir)
+
+    char *url;           // send mode
+
+    char *key_mode;      // "symmetric" / "asymmetric" or NULL
+    int   on_all;        // metadata flag
+    int   timeout_secs;  // 0 = no monitoring, >0 = watch dir
+
+    char *public_key_path;
+    char *private_key_path;
+    char *sym_key_path;
+    char *cert_path;
 } key_mode_config_t;
 
 typedef struct {

@@ -1,5 +1,3 @@
-# Example of code for starting a server and receiving + decrypting a file
-
 from flask import Flask, request
 import os
 import subprocess
@@ -18,8 +16,18 @@ def upload():
     f = request.files.get("file")
     device_id = request.form.get("device_id", "unknown")
 
+    # END SIGNAL: no file,"end=1"
+    if "end" in request.form and "file" not in request.files:
+        end_value = request.form.get("end")
+        print(f"[SERVER] End signal from device '{device_id}', value={end_value}")
+        # any cleanup, flush queues, close sessions, etc.
+        return "END OK\n", 200
+
+    # NORMAL FILE UPLOAD
+    f = request.files.get("file")
     if not f:
-        return "no file field", 400
+        # If neither file nor end -> it's a malformed request
+        return "no file field and no end signal\n", 400
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     enc_name = f"{device_id}_{timestamp}_{f.filename}"
@@ -33,6 +41,7 @@ def upload():
     base_plain = f"{device_id}_{timestamp}_{f.filename}"
     dec_path   = os.path.join(DECRYPTED_DIR, base_plain)
 
+    # Run filesend binary. Args should match sending format or it will fail
     try:
         subprocess.check_call([
             "bin/./filesend",

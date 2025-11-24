@@ -7,9 +7,9 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 ---
 
 ```
-filesend send    <file> <url> [--encrypt symmetric|asymmetric] [--all]
-filesend encrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>]
-filesend decrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>]
+filesend send    <path> <url> [--encrypt symmetric|asymmetric] [--all][--timeout <n>]
+filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>][--timeout <n>]
+filesend decrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>][--timeout <n>]
 ```
 
 #### Mode: `send`
@@ -21,18 +21,19 @@ Sends a file to a remote HTTPS server.
 You may choose whether to encrypt the file before sending it.
 
 ```
-filesend send <file> <url> [--encrypt symmetric|asymmetric] [--all]
+filesend send <path> <url> [--encrypt symmetric|asymmetric] [--all][--timeout <n>]
 ```
 
 **Parameters**
 
-* **`<file>`** – path to the file you want to send
+* **`<path>`** – path to the file or directory you want to send
 * **`<url>`** – full server URL (must include `/upload`)
 
   Example: `https://myserver.local:8443/upload`
 * **`--encrypt symmetric`** – encrypt using libsodium symmetric key
 * **`--encrypt asymmetric`** – encrypt using libsodium sealed box (public key)
 * **`--all`** – encrypt file **metadata** as well as contents
+* **`--timeout`** – monitor `<path>` directory until specified timeout
 
 **Environment variables**
 
@@ -72,15 +73,16 @@ filesend send logs/system.log "https://myserver.local:8443/upload" \
 Encrypts a file locally.
 
 ```
-filesend encrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>]
+filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>][--timeout <n>]
 ```
 
-Arguments
+Arguments:
 
 * **`--asymmetric`** – use sealed box with public key
 * **`--symmetric`** – use symmetric key
 * **`--dest <file>`** – custom output path
 * **`--all`** – encrypt metadata too
+* **`--timeout`** – perform encryption on `<path>` directory until specified timeout
 
 - Asymmetric encryption with metadata (The encrypted output will default to `raw/data.bin`):
 
@@ -103,7 +105,7 @@ filesend encrypt raw/data.bin --symmetric --all
 Decrypts a file previously encrypted with `filesend`.
 
 ```
-filesend decrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>]
+filesend decrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>][--timeout <n>]
 ```
 
 Arguments:
@@ -112,6 +114,7 @@ Arguments:
 * **`--asymmetric`** – decrypt with private key
 * **`--dest <file>`** – output path for decrypted file
 * **`--all`** – restore metadata and validate integrity
+* **`--timeout`** – perform decryption on `<path>` directory until specified timeout
 
 Required environment variables (depending on mode):
 

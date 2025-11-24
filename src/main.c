@@ -1,103 +1,179 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <sodium.h>
-#include <sodium/core.h>
-#include <sodium/crypto_box.h>
+#include <curl/curl.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <limits.h>
+#include <unistd.h>
 
 #include "../include/key_utils.h"
-#include "../include/file_utils.h"
 #include "../include/send_utils.h"
+#include "../include/dir_utils.h"
 
-// Change to your actual env variables names from .env 
-const char* PUB_KEY_ENV = "PUB_KEY_PATH";
-const char* PR_KEY_ENV = "PR_KEY_PATH";
-const char* SYM_KEY_ENV = "SYM_KEY_PATH";
+const char* PUB_KEY_ENV   = "PUB_KEY_PATH";
+const char* PR_KEY_ENV    = "PR_KEY_PATH";
+const char* SYM_KEY_ENV   = "SYM_KEY_PATH";
 const char* CERT_PATH_ENV = "CERT_PATH";
 
 void usage(const char* prog) {
     fprintf(
         stderr,
         "Usage:\n"
-        "  %s send    <file> <url> [--encrypt symmetric|asymmetric][--all]\n"
-        "  %s encrypt <file> [--symmetric|--asymmetric][--all][--dest <file>]\n"
-        "  %s decrypt <file> [--symmetric|--asymmetric][--all][--dest <file>]\n",
+        "  %s send    <path> <url> "
+        "[--encrypt symmetric|asymmetric] [--all] [--timeout <n>]\n"
+        "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
+        "[--dest <file>] [--timeout <n>]\n"
+        "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
+        "[--dest <file>] [--timeout <n>]\n",
         prog, prog, prog
     );
 }
 
 int parse_args(int argc, char** argv, key_mode_config_t* cf) {
-    // Necessary args
-    cf->mode = argv[1];
-    cf->init_file = argv[2];
+    if (argc < 3) {
+        usage(argv[0]);
+        return -1;
+    }
 
-    cf->public_key_path = getenv(PUB_KEY_ENV);
+    memset(cf, 0, sizeof(*cf));
+
+    cf->mode      = argv[1];
+    cf->init_path = argv[2];
+    cf->timeout_secs = 0;   // default: no monitoring
+
+    // envs
+    cf->public_key_path  = getenv(PUB_KEY_ENV);
     cf->private_key_path = getenv(PR_KEY_ENV);
-    cf->sym_key_path = getenv(SYM_KEY_ENV);
-    cf->cert_path = getenv(CERT_PATH_ENV);
+    cf->sym_key_path     = getenv(SYM_KEY_ENV);
+    cf->cert_path        = getenv(CERT_PATH_ENV);
 
-    if (strcmp(cf->mode, "send") == 0) { // sending a file
+    if (strcmp(cf->mode, "send") == 0) {
+        if (argc < 4) {
+            fprintf(
+                stderr,
+                RED "[ERROR] send mode requires <path> and <url>\n" RESET
+            );
+            usage(argv[0]);
+            return -1;
+        }
+
         cf->url = argv[3];
 
-        if (argc > 4) {
-            cf->submode = argv[4];
-            cf->key_mode = argv[5];
+        for (int i = 4; i < argc; ++i) {
+            const char *arg = argv[i];
 
-            // Specific/optional args
-            for (int i = 6; i < argc; i++) {
-                const char* arg = argv[i];
-                
-                if (strcmp(arg, "--all") == 0) cf->on_all = 1;
-
-                // More options can be added later
-                    
-                else {
+            if (strcmp(arg, "--encrypt") == 0) {
+                if (i + 1 >= argc) {
                     fprintf(
-                        stderr, 
-                        "[ERROR] Unknown arguments\n"
+                        stderr,
+                        RED "[ERROR] --encrypt requires 'symmetric' or 'asymmetric'\n" RESET
                     );
                     return -1;
                 }
-            }
-        }
-        
-    } else { // encrypting/decrypting a file
-        cf->key_mode = argv[3];
 
-        // Specific/optional args
-        for (int i = 4; i < argc; i++) {
-            const char* arg = argv[i];
-            if (strcmp(arg, "--all") == 0) 
+                const char* mode = argv[++i];
+                if (strcmp(mode, "symmetric") == 0 || strcmp(mode, "asymmetric") == 0) {
+                    cf->key_mode = (char*)mode;
+                } else {
+                    fprintf(
+                        stderr,
+                        RED "[ERROR] Unknown encrypt mode: %s\n" RESET, mode
+                    );
+                    return -1;
+                }
+            } else if (strcmp(arg, "--all") == 0) {
                 cf->on_all = 1;
-            else if (strcmp(arg, "--dest") == 0 && i+1<argc) 
-                cf->dest_file = argv[++i];
-
-            // More options can be added later
-                
-            else {
+            } else if (strcmp(arg, "--timeout") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(
+                        stderr,
+                        RED "[ERROR] --timeout requires integer seconds\n" RESET
+                    );
+                    return -1;
+                }
+                cf->timeout_secs = atoi(argv[++i]);
+                if (cf->timeout_secs < 0) cf->timeout_secs = 0;
+            } else {
                 fprintf(
-                    stderr, 
-                    "[ERROR] Unknown arguments\n"
+                    stderr,
+                    RED "[ERROR] Unknown argument in send mode: %s\n" RESET, arg
                 );
                 return -1;
             }
         }
 
-        if (cf->dest_file == NULL) cf->dest_file = cf->init_file;
+    } else if (strcmp(cf->mode, "encrypt") == 0 || strcmp(cf->mode, "decrypt") == 0) {
+
+        for (int i = 3; i < argc; ++i) {
+            const char *arg = argv[i];
+
+            if (strcmp(arg, "--symmetric") == 0) {
+                cf->key_mode = "symmetric";
+            } else if (strcmp(arg, "--asymmetric") == 0) {
+                cf->key_mode = "asymmetric";
+            } else if (strcmp(arg, "--all") == 0) {
+                cf->on_all = 1;
+            } else if (strcmp(arg, "--dest") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(
+                        stderr,
+                        RED "[ERROR] --dest requires a file/directory path\n" RESET
+                    );
+                    return -1;
+                }
+                cf->dest_path = argv[++i];
+            } else if (strcmp(arg, "--timeout") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(
+                        stderr,
+                        RED "[ERROR] --timeout requires integer seconds\n" RESET
+                    );
+                    return -1;
+                }
+                cf->timeout_secs = atoi(argv[++i]);
+                if (cf->timeout_secs < 0) cf->timeout_secs = 0;
+            } else {
+                fprintf(
+                    stderr,
+                    RED "[ERROR] Unknown argument in %s mode: %s\n" RESET, cf->mode, arg
+                );
+                return -1;
+            }
+        }
+
+        if (!cf->key_mode) {
+            fprintf(
+                stderr,
+                RED "[ERROR] %s mode requires --symmetric or --asymmetric\n" RESET, cf->mode
+            );
+            return -1;
+        }
+
+        if (cf->dest_path == NULL) {
+            // For single file, this is "in-place".
+            // For directory, we will treat dest_path as directory if given;
+            // otherwise, files are processed "in place".
+            cf->dest_path = cf->init_path;
+        }
+
+    } else {
+        fprintf(stderr, RED "[ERROR] Unknown mode: %s\n" RESET, cf->mode);
+        usage(argv[0]);
+        return -1;
     }
 
     return 0;
 }
 
 int main(int argc, char** argv) {
-    if (argc < 4) {
+    if (argc < 3) {
         usage(argv[0]);
         return EXIT_FAILURE;
     }
 
-    key_mode_config_t cf = {0}; 
+    key_mode_config_t cf;
     if (parse_args(argc, argv, &cf) != 0) return EXIT_FAILURE;
 
     if (sodium_init() < 0) {
@@ -107,82 +183,103 @@ int main(int argc, char** argv) {
         );
         return EXIT_FAILURE;
     }
-    
+
+    // SEND MODE (file or directory, optional monitoring)
     if (strcmp(cf.mode, "send") == 0) {
-        if (strcmp(cf.submode, "--encrypt") == 0) {
-            const char* key_path = (strcmp(cf.key_mode, "symmetric") == 0) ? cf.sym_key_path : cf.public_key_path;
-            return send_encrypted_file(
-                cf.url, 
-                cf.init_file, 
-                cf.cert_path, 
-                key_path, 
-                cf.key_mode, 
-                cf.on_all) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-        }
-        
-        return send_file(cf.url, cf.init_file, cf.cert_path) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
-
-    // Symmetric key mode
-    if (strcmp(cf.key_mode, "--symmetric") == 0) {
-        unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
-
-        if (cf.sym_key_path == NULL) cf.sym_key_path = DEFAULT_SYM_KEY_PATH;
-
-        if (load_or_create_symmetric_key(cf.sym_key_path, key, sizeof(key)) != 0) {
+        if (!cf.cert_path) {
             fprintf(
                 stderr,
-                RED "[ERROR] Failed to create symmetric key\n" RESET
+                RED "[ERROR] CERT_PATH env variable not set\n" RESET
             );
             return EXIT_FAILURE;
         }
 
-        if (strcmp(cf.mode, "encrypt") == 0) {
-            return encrypt_file_symmetric(key, cf.init_file, cf.dest_file) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else if (strcmp(cf.mode, "decrypt") == 0) {
-            return decrypt_file_symmetric(key, cf.init_file, cf.dest_file) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        CURL *curl = curl_easy_init();
+        if (!curl) {
+            fprintf(stderr, RED "[ERROR] curl_easy_init failed\n" RESET);
+            return EXIT_FAILURE;
         }
-    } 
-    
-    // Asymmetric key mode (public/private key)
-    else if (strcmp(cf.key_mode, "--asymmetric") == 0) {
 
-        if (cf.private_key_path == NULL) cf.private_key_path = DEFAULT_PR_KEY_PATH;
-        if (cf.public_key_path == NULL) cf.public_key_path = DEFAULT_PUB_KEY_PATH;
+        // global TLS options
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+        curl_easy_setopt(curl, CURLOPT_CAINFO, cf.cert_path);
 
-        if (strcmp(cf.mode, "encrypt") == 0) {
+        send_ctx_t sctx = { .curl = curl, .cf = &cf };
 
-            unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
-            if (load_or_create_asymmetric_key_pair(cf.public_key_path, cf.private_key_path, pub_key, sizeof(pub_key)) != 0) {
+        int ret = monitor_path(cf.init_path, cf.timeout_secs, send_file_callback, &sctx);
+
+        if (ret == 0 && cf.timeout_secs > 0) send_end_signal(curl, cf.url, cf.cert_path);
+
+        curl_easy_cleanup(curl);
+        return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    // ENCRYPT / DECRYPT MODES
+    if (!cf.key_mode) {
+        fprintf(
+            stderr,
+            RED "[ERROR] %s mode requires key mode\n" RESET, cf.mode
+        );
+        return EXIT_FAILURE;
+    }
+
+    // Symmetric
+    if (strcmp(cf.key_mode, "symmetric") == 0) {
+        sym_ctx_t sctx;
+        sctx.cf = &cf;
+
+        if (!cf.sym_key_path) cf.sym_key_path = DEFAULT_SYM_KEY_PATH;
+
+        if (load_or_create_symmetric_key(cf.sym_key_path, sctx.key, sizeof(sctx.key)) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to create/load symmetric key\n" RESET
+            );
+            return EXIT_FAILURE;
+        }
+
+        return (monitor_path(cf.init_path, cf.timeout_secs, sym_file_callback, &sctx) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    // Asymmetric
+    else if (strcmp(cf.key_mode, "asymmetric") == 0) {
+        asym_ctx_t actx;
+        actx.cf = &cf;
+        actx.is_decrypt = (strcmp(cf.mode, "decrypt") == 0);
+
+        if (!cf.private_key_path) cf.private_key_path = DEFAULT_PR_KEY_PATH;
+        if (!cf.public_key_path)  cf.public_key_path = DEFAULT_PUB_KEY_PATH;
+
+        if (!actx.is_decrypt) {
+            // ENCRYPT: only need pub_key
+            if (load_or_create_asymmetric_key_pair(cf.public_key_path,
+                                                   cf.private_key_path,
+                                                   actx.pub_key,
+                                                   sizeof(actx.pub_key)) != 0) {
                 fprintf(
                     stderr,
-                    RED "[ERROR] Failed to create asymmetric key\n" RESET
+                    RED "[ERROR] Failed to create/load asymmetric key\n" RESET
                 );
                 return EXIT_FAILURE;
             }
-            
-            return encrypt_file_asymmetric(pub_key, cf.init_file, cf.dest_file, cf.on_all) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-            
-        } else if (strcmp(cf.mode, "decrypt") == 0) {
-
-            unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
-            unsigned char pr_key[crypto_box_SECRETKEYBYTES];
-
-            if (load_key(cf.public_key_path, pub_key, sizeof(pub_key)) != 0 || 
-                load_key(cf.private_key_path, pr_key, sizeof(pr_key)) != 0) {
+        } else {
+            // DECRYPT: need both pub + private
+            if (load_key(cf.public_key_path, actx.pub_key, sizeof(actx.pub_key)) != 0 ||
+                load_key(cf.private_key_path, actx.pr_key, sizeof(actx.pr_key)) != 0) {
                 fprintf(
-                    stderr, 
-                    RED "Failed to load asymmetric key pair.\n" RESET
+                    stderr,
+                    RED "[ERROR] Failed to load asymmetric key pair\n" RESET
                 );
-                return -1;
+                return EXIT_FAILURE;
             }
-
-            return decrypt_file_asymmetric(pub_key, pr_key, cf.init_file, cf.dest_file, cf.on_all) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
         }
+
+        return (monitor_path(cf.init_path, cf.timeout_secs, asym_file_callback, &actx) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     fprintf(
-        stderr, 
+        stderr,
         RED "[ERROR] Wrong arguments specified\n" RESET
     );
     return EXIT_FAILURE;
