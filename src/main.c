@@ -189,10 +189,7 @@ int main(int argc, char** argv) {
     // SEND MODE (file or directory, optional monitoring)
     if (strcmp(cf.mode, "send") == 0) {
         if (!cf.cert_path) {
-            fprintf(
-                stderr,
-                RED "[ERROR] CERT_PATH env variable not set\n" RESET
-            );
+            fprintf(stderr, RED "[ERROR] CERT_PATH env variable not set\n" RESET);
             return EXIT_FAILURE;
         }
 
@@ -202,7 +199,7 @@ int main(int argc, char** argv) {
             return EXIT_FAILURE;
         }
 
-        // global TLS options
+        // global TLS options for HTTPS
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
         curl_easy_setopt(curl, CURLOPT_CAINFO, cf.cert_path);
@@ -211,19 +208,14 @@ int main(int argc, char** argv) {
         sctx.cf   = &cf;
         sctx.curl = curl;
 
-        int ret = monitor_path(cf.init_path, cf.timeout_secs, send_file_callback, &sctx);
+        int ret = monitor_and_send(cf.init_path, cf.timeout_secs, &sctx);
 
-#ifdef USE_WS
-        if (cf.use_ws && sctx.ws_count > 0) {
-            int ws_ret = send_files_via_ws(cf.url, "pi", sctx.ws_files, sctx.ws_count, cf.cert_path);
-            if (ws_ret != 0) ret = -1;
+#ifndef USE_WS
+        if (ret == 0 && cf.timeout_secs > 0 && !cf.use_ws) {
+            send_end_signal_via_https(curl, cf.url, cf.cert_path);
         }
-
-        ws_queue_free(&sctx);
-#else
-        if (ret == 0 && cf.timeout_secs > 0 && !cf.use_ws) send_end_signal_via_https(curl, cf.url, cf.cert_path);
 #endif
-        
+
         curl_easy_cleanup(curl);
         return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
     }
@@ -252,7 +244,7 @@ int main(int argc, char** argv) {
             return EXIT_FAILURE;
         }
 
-        return (monitor_path(cf.init_path, cf.timeout_secs, sym_file_callback, &sctx) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+        return (monitor(cf.init_path, cf.timeout_secs, sym_file_callback, &sctx) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     // Asymmetric
@@ -289,7 +281,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        return (monitor_path(cf.init_path, cf.timeout_secs, asym_file_callback, &actx) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+        return (monitor(cf.init_path, cf.timeout_secs, asym_file_callback, &actx) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     fprintf(
