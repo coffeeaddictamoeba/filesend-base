@@ -32,6 +32,32 @@ void free_processed(processed_node_t *head) {
     }
 }
 
+#ifdef USE_WS
+int ws_queue_add_file(send_ctx_t *ctx, const char* file_path) {
+    if (ctx->ws_count == ctx->ws_cap) {
+        int new_cap = ctx->ws_cap ? ctx->ws_cap * 2 : 8;
+        const char **new_arr = realloc(ctx->ws_files, new_cap * sizeof(*new_arr));
+        if (!new_arr) {
+            fprintf(stderr, "[ERROR] ws_queue_add_file: out of memory\n");
+            return -1;
+        }
+        ctx->ws_files = new_arr;
+        ctx->ws_cap = new_cap;
+    }
+    ctx->ws_files[ctx->ws_count++] = strdup(file_path);
+    return 0;
+}
+
+void ws_queue_free(send_ctx_t* ctx) {
+    for (int i = 0; i < ctx->ws_count; ++i) {
+        free((void*)ctx->ws_files[i]);
+    }
+    free(ctx->ws_files);
+    ctx->ws_files = NULL;
+    ctx->ws_count = ctx->ws_cap = 0;
+}
+#endif
+
 // Generic path handler: if file -> call callback once,
 // if dir -> process files, and (if timeout > 0) monitor until no new files appear.
 int monitor_path(const char* p, int timeout_secs, file_cb_t cb, void* ctx) {
@@ -150,21 +176,61 @@ int send_file_callback(const char *file_path, void *ctx_void) {
             cf->on_all
         );
     } else {
-        if (!cf->key_mode) return send_file_via_ws(ctx->cf->url, file_path);
-        
-        // key_mode is "symmetric" or "asymmetric"
-        const char *key_path = NULL;
-        if (strcmp(cf->key_mode, "symmetric") == 0) 
-            key_path = cf->sym_key_path;
-        else key_path = cf->public_key_path;
+#ifdef USE_WS
+        int r = 0;
 
-        return send_encrypted_file_via_ws(
-            cf->url,
-            file_path,
-            key_path,
-            cf->key_mode,
-            cf->on_all
-        );
+        if (!cf->key_mode) {
+            // no encryption, just queue raw file
+            r = ws_queue_add_file(ctx, file_path);
+        } else {
+            // key_mode is "symmetric" or "asymmetric"
+            const char *key_path = NULL;
+
+            if (strcmp(cf->key_mode, "symmetric") == 0) {
+                key_path = cf->sym_key_path ? cf->sym_key_path : DEFAULT_SYM_KEY_PATH;
+
+                unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
+                if (load_or_create_symmetric_key(key_path, key, sizeof(key)) != 0) {
+                    fprintf(stderr, RED "[ERROR] Failed to create symmetric key\n" RESET);
+                    return -1;
+                }
+
+                if (encrypt_file_symmetric(key, file_path, file_path) != 0) {
+                    fprintf(stderr, RED "[ERROR] Failed to encrypt file %s (symmetric)\n" RESET, file_path);
+                    return -1;
+                }
+
+                r = ws_queue_add_file(ctx, file_path);
+
+            } else { // asymmetric
+                key_path = cf->public_key_path ? cf->public_key_path : DEFAULT_PUB_KEY_PATH;
+                const char *pr_dummy = DEFAULT_SYM_KEY_PATH; // for creation only
+
+                unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
+                if (load_or_create_asymmetric_key_pair(key_path, pr_dummy, pub_key, sizeof(pub_key)) != 0) {
+                    fprintf(stderr, RED "[ERROR] Failed to create asymmetric key\n" RESET);
+                    return -1;
+                }
+
+                if (encrypt_file_asymmetric(pub_key, file_path, file_path, cf->on_all) != 0) {
+                    fprintf(stderr, RED "[ERROR] Failed to encrypt file %s (asymmetric)\n" RESET, file_path);
+                    return -1;
+                }
+
+                r = ws_queue_add_file(ctx, file_path);
+            }
+        }
+
+        if (r != 0) {
+            fprintf(stderr, "[ERROR] Failed to queue file %s for WS\n", file_path);
+            return -1;
+        }
+
+        return 0;
+#else
+        fprintf(stderr, "[ERROR] WebSocket is not enabled\n");
+        return -1;
+#endif
     }
 }
 

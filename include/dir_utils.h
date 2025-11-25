@@ -12,6 +12,13 @@ typedef struct processed_node {
 typedef struct {
     CURL *curl;
     key_mode_config_t *cf;
+
+#ifdef USE_WS
+    const char **ws_files;
+    int ws_count;
+    int ws_cap;
+#endif
+
 } send_ctx_t;
 
 typedef struct {
@@ -27,11 +34,16 @@ typedef struct {
 } asym_ctx_t;
 
 // Callback signature for processing a single file
-typedef int (*file_cb_t)(const char *file_path, void *ctx);
+typedef int (*file_cb_t)(const char* file_path, void* ctx);
 
 int monitor_path(const char* p, int timeout_secs, file_cb_t cb, void* ctx);
 
-int send_file_callback(const char *file_path, void *ctx_void);
-int sym_file_callback(const char *file_path, void *ctx_void);
-int asym_file_callback(const char *file_path, void *ctx_void);
+int send_file_callback(const char* file_path, void* ctx_void);
+int sym_file_callback(const char* file_path, void* ctx_void);
+int asym_file_callback(const char* file_path, void* ctx_void);
+
+#ifdef USE_WS
+int ws_queue_add_file(send_ctx_t* ctx, const char* file_path);
+void ws_queue_free(send_ctx_t* ctx);
+#endif
 

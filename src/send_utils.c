@@ -1,10 +1,13 @@
-// send_utils.c
 #include <curl/curl.h>
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_secretstream_xchacha20poly1305.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+#ifdef USE_WS
+#include <libwebsockets.h>
+#endif
 
 #include "../include/file_utils.h"
 #include "../include/key_utils.h"
@@ -159,76 +162,232 @@ int send_end_signal_via_https(CURL *curl, const char *url, const char *cert) {
     return ret;
 }
 
-int send_file_via_ws(const char *ws_url, const char *file_path) {
-    char cmd[2048];
+#ifdef USE_WS
+client_state_t state;
 
-    snprintf(
-        cmd, 
-        sizeof(cmd),
-        "python3 examples/send_ws.py '%s' '%s'", ws_url, file_path
-    );
+int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
+    switch(reason) {
+        case LWS_CALLBACK_CLIENT_ESTABLISHED:
+            lwsl_user("[WS] Connected to server\n");
+            lws_callback_on_writable(wsi);
+            break;
 
-    int rc = system(cmd);
-    if (rc != 0) {
-        fprintf(
-            stderr, 
-            RED "[ERROR] send_ws.py failed, rc=%d\n" RESET, rc
-        );
-        return -1;
-    }
+        case LWS_CALLBACK_CLIENT_WRITEABLE: {
+            if (state.current_file >= state.file_count) {
+                // send "end"
+                char msg[256];
+                snprintf(msg, sizeof(msg), "{\"type\":\"end\"}");
 
+                size_t n = strlen(msg);
+                unsigned char* buf = malloc(LWS_PRE + n);
+                memcpy(&buf[LWS_PRE], msg, n);
+
+                lwsl_user("[WS] Sending end\n");
+                lws_write(wsi, &buf[LWS_PRE], n, LWS_WRITE_TEXT);
+                free(buf);
+
+                return 0;
+            }
+
+            const char* path = state.files[state.current_file];
+            const char* filename = strrchr(path, '/');
+
+            if (!filename) filename = path; else filename++;
+
+            if (state.phase == 0) {
+                // send header JSON
+                char json[512];
+                snprintf(
+                    json, 
+                    sizeof(json), 
+                    "{\"type\":\"file\",\"filename\":\"%s\",\"device_id\":\"%s\"}", filename, state.device_id
+                );
+
+                size_t n = strlen(json);
+                unsigned char* buf = malloc(LWS_PRE + n);
+                memcpy(&buf[LWS_PRE], json, n);
+
+                lwsl_user("[WS] Sending header: %s\n", json);
+                lws_write(wsi, &buf[LWS_PRE], n, LWS_WRITE_TEXT);
+                free(buf);
+
+                // open file
+                state.fp = fopen(path, "rb");
+                if (!state.fp) {
+                    lwsl_err("[WS] Failed to open file %s\n", path);
+                    return -1;
+                }
+
+                state.phase = 1;
+                lws_callback_on_writable(wsi);
+                break;
+            }
+
+            if (state.phase == 1) {
+                char buf_raw[SEND_CHUNK_SIZE];
+                size_t r = fread(buf_raw, 1, SEND_CHUNK_SIZE, state.fp);
+
+                if (r > 0) {
+                    // send binary frame
+                    unsigned char* buf = malloc(LWS_PRE + r);
+                    memcpy(&buf[LWS_PRE], buf_raw, r);
+
+                    lws_write(wsi, &buf[LWS_PRE], r, LWS_WRITE_BINARY);
+                    free(buf);
+
+                    lws_callback_on_writable(wsi);
+                    break;
+                }
+
+                fclose(state.fp);
+                state.fp = NULL;
+                state.phase = 2;
+                lws_callback_on_writable(wsi);
+                break;
+            }
+
+            if (state.phase == 2) {
+                char json[128];
+                snprintf(json, sizeof(json), "{\"type\":\"file_end\"}");
+
+                size_t n = strlen(json);
+                unsigned char* buf = malloc(LWS_PRE + n);
+                memcpy(&buf[LWS_PRE], json, n);
+
+                lwsl_user("[WS] Sending file_end for file %d\n", state.current_file);
+                lws_write(wsi, &buf[LWS_PRE], n, LWS_WRITE_TEXT);
+                free(buf);
+
+                state.phase = 3;
+                break;
+            }
+
+            break;
+        }
+
+        case LWS_CALLBACK_CLIENT_RECEIVE:
+            lwsl_user("[WS] Received reply: %.*s\n", (int)len, (char*)in);
+
+            // server confirms file_done -> next file
+            if (state.phase == 3) {
+                state.current_file++;
+                state.phase = 0;
+                lws_callback_on_writable(wsi);
+            }
+
+            break;
+            
+        case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
+            lwsl_err("[WS] Connection error\n");
+            break;
+
+        case LWS_CALLBACK_CLIENT_CLOSED:
+            lwsl_user("[WS] Connection closed\n");
+            break;
+        
+        default:
+            break;
+        }
     return 0;
 }
 
-int send_encrypted_file_via_ws(const char* ws_url, const char* file_path, const char* key_path, const char* key_mode, int enc_all) {
-    // Symmetric key mode
-    if (strcmp(key_mode, "symmetric") == 0) {
-        const char* p = (key_path == NULL) ? DEFAULT_SYM_KEY_PATH : key_path;
+int send_files_via_ws(const char* ws_url, const char* device_id, const char** files, int file_count, const char* cert) {
+    strcpy(state.device_id, device_id);
+    state.files = files;
+    state.file_count = file_count;
+    state.current_file = 0;
+    state.phase = 0;
 
-        unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
-        if (load_or_create_symmetric_key(p, key, sizeof(key)) != 0) {
-            fprintf(
-                stderr,
-                RED "[ERROR] Failed to create symmetric key\n" RESET
-            );
-            return -1;
-        }
+    struct lws_protocols protocols[] = {
+        { "ws-protocol", ws_callback, 0, 4096 },
+        { NULL, NULL, 0, 0 }
+    };
 
-        if (encrypt_file_symmetric(key, file_path, file_path) != 0) {
-            fprintf(
-                stderr,
-                RED "[ERROR] Failed to encrypt the file: %s (symmetric encryption)\n" RESET, file_path
-            );
-            return -1;
-        }
+    struct lws_context_creation_info info;
+    memset(&info, 0, sizeof(info));
+    info.port = CONTEXT_PORT_NO_LISTEN;
+    info.protocols = protocols;
 
-        return send_file_via_ws(ws_url, file_path);
+    // enable SSL init globally for client, in case we use wss://
+    info.options |= LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+
+    struct lws_context* context = lws_create_context(&info);
+    if (!context) {
+        fprintf(stderr, "[WS] Failed to create context\n");
+        return -1;
     }
 
-    // Asymmetric key mode (public/private key)
-    else if (strcmp(key_mode, "asymmetric") == 0) {
-        const char* pub = (key_path == NULL) ? DEFAULT_PUB_KEY_PATH : key_path;
-        const char* pr  = DEFAULT_SYM_KEY_PATH;  // placeholder for creation
+    struct lws_client_connect_info ccinfo;
+    memset(&ccinfo, 0, sizeof(ccinfo));
+    ccinfo.context = context;
 
-        unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
-        if (load_or_create_asymmetric_key_pair(pub, pr, pub_key, sizeof(pub_key)) != 0) {
-            fprintf(
-                stderr,
-                RED "[ERROR] Failed to create asymmetric key\n" RESET
-            );
-            return -1;
-        }
+    // defaults
+    ccinfo.address = "127.0.0.1";
+    ccinfo.port    = 8444;
+    ccinfo.path    = "/";
+    ccinfo.host    = ccinfo.address;
 
-        if (encrypt_file_asymmetric(pub_key, file_path, file_path, enc_all) != 0) {
-            fprintf(
-                stderr,
-                RED "[ERROR] Failed to encrypt the file: %s (asymmetric encryption)\n" RESET, file_path
-            );
-            return -1;
-        }
+    // Parse ws:// or wss://
+    int use_ssl = 0;
+    const char *p = NULL;
 
-        return send_file_via_ws(ws_url, file_path);
+    if (strncmp(ws_url, "wss://", 6) == 0) {
+        use_ssl = 1;
+        p = ws_url + 6;
+    } else if (strncmp(ws_url, "ws://", 5) == 0) {
+        use_ssl = 0;
+        p = ws_url + 5;
+    } else {
+        fprintf(stderr, "[WS] URL must start with ws:// or wss://: %s\n", ws_url);
+        lws_context_destroy(context);
+        return -1;
     }
 
-    return -1; // should not reach
+    char host[256];
+    const char *slash = strchr(p, '/');
+    const char *colon = strchr(p, ':');
+
+    if (!slash) slash = p + strlen(p); // no path, host[:port] only
+
+    if (colon && colon < slash) {
+        // ws[s]://host:port/path
+        size_t host_len = (size_t)(colon - p);
+        if (host_len >= sizeof(host)) host_len = sizeof(host) - 1;
+        memcpy(host, p, host_len);
+        host[host_len] = '\0';
+
+        ccinfo.address = strdup(host);
+        ccinfo.host    = ccinfo.address;
+        ccinfo.port    = atoi(colon + 1);
+        ccinfo.path    = (*slash ? slash : "/");
+    } else {
+        // ws[s]://host/path
+        size_t host_len = (size_t)(slash - p);
+        if (host_len >= sizeof(host)) host_len = sizeof(host) - 1;
+        memcpy(host, p, host_len);
+        host[host_len] = '\0';
+
+        ccinfo.address = strdup(host);
+        ccinfo.host    = ccinfo.address;
+        ccinfo.path    = (*slash ? slash : "/");
+    }
+
+    info.options |= LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+
+    if (use_ssl && cert) {
+        info.ssl_ca_filepath = cert;
+    }
+
+    if (!lws_client_connect_via_info(&ccinfo)) {
+        fprintf(stderr, "[WS] Connection failed\n");
+        lws_context_destroy(context);
+        return -1;
+    }
+
+    // Event loop
+    while (lws_service(context, 100) >= 0) { /*loop until closed*/ }
+
+    lws_context_destroy(context);
+    return 0;
 }
+#endif

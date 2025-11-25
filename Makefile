@@ -1,6 +1,6 @@
 CC=gcc
-CFLAGS=-Wall -Wextra -O2 -Iinclude 
-LDFLAGS=-lsodium -lcurl
+CFLAGS=-Wall -Wextra -O2 -Iinclude -DUSE_WS
+LDFLAGS=-lsodium -lcurl -lwebsockets
 BUILD_DIR = bin
 OBJ_DIR = obj
 SRC_DIR = src

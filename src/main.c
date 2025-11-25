@@ -207,12 +207,23 @@ int main(int argc, char** argv) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
         curl_easy_setopt(curl, CURLOPT_CAINFO, cf.cert_path);
 
-        send_ctx_t sctx = { .curl = curl, .cf = &cf };
+        send_ctx_t sctx = {0};
+        sctx.cf   = &cf;
+        sctx.curl = curl;
 
         int ret = monitor_path(cf.init_path, cf.timeout_secs, send_file_callback, &sctx);
 
-        if (ret == 0 && cf.timeout_secs > 0 && !cf.use_ws) send_end_signal_via_https(curl, cf.url, cf.cert_path);
+#ifdef USE_WS
+        if (cf.use_ws && sctx.ws_count > 0) {
+            int ws_ret = send_files_via_ws(cf.url, "pi", sctx.ws_files, sctx.ws_count, cf.cert_path);
+            if (ws_ret != 0) ret = -1;
+        }
 
+        ws_queue_free(&sctx);
+#else
+        if (ret == 0 && cf.timeout_secs > 0 && !cf.use_ws) send_end_signal_via_https(curl, cf.url, cf.cert_path);
+#endif
+        
         curl_easy_cleanup(curl);
         return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
     }
