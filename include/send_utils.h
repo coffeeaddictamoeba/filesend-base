@@ -1,13 +1,11 @@
+#ifndef SEND_UTILS_H
+#define SEND_UTILS_H
+
 #include <curl/curl.h>
 
-typedef struct {
-    FILE* fp;
-    const char** files;
-    int file_count;
-    int current_file;
-    char device_id[64];
-    int phase;  // 0=send header, 1=send data, 2=send file_end, 3=wait reply
-} client_state_t;
+#ifdef USE_WS
+#include <libwebsockets.h>
+#endif
 
 int send_file_via_https(
     CURL* curl,
@@ -36,6 +34,55 @@ int send_end_signal_via_https(
 
 #define SEND_CHUNK_SIZE 65536
 
+typedef struct {
+    FILE* fp;
+    const char** files;
+    int file_count;
+    int current_file;
+    char device_id[64];
+    int phase;  // 0=send header, 1=send data, 2=send file_end, 3=wait reply
+} client_state_t;
+
+typedef struct {
+    struct lws_context *ctx;
+    struct lws *wsi;
+    int connected;
+
+    // Config
+    char device_id[64];
+    char url[512];
+    char ca_path[512];   // may be empty
+    char key_mode[16];   // "", "symmetric", "asymmetric"
+    char key_path[512];  // path to key / pubkey
+    int  enc_all;
+
+    // File queue
+    char **files;
+    int file_count;
+    int file_cap;
+    int current_file;
+    int phase;           // 0=header,1=chunks,2=file_end,3=wait_reply
+    FILE *fp;
+
+    int done_flag;       // monitor says "no more files will come"
+    int end_sent;        // we have sent {"type":"end"}
+} ws_client_t;
+
+int  ws_client_init(
+    ws_client_t *c,
+    const char *ws_url,
+    const char *device_id,
+    const char *cert,
+    const char *key_mode,
+    const char *key_path,
+    int enc_all
+);
+
+int  ws_client_enqueue_file(ws_client_t *c, const char *file_path);
+void ws_client_mark_done(ws_client_t *c);
+int  ws_client_service(ws_client_t *c, int timeout_ms);
+void ws_client_destroy(ws_client_t *c);
+
 int send_files_via_ws(
     const char* ws_url,
     const char* device_id,
@@ -54,4 +101,6 @@ int send_encrypted_files_via_ws(
     const char* key_path,   // path to key / pubkey
     int enc_all
 );
-#endif
+#endif // USE_WS
+
+#endif // SEND_UTILS_H

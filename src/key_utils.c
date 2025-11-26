@@ -1,4 +1,3 @@
-#include "../include/key_utils.h"
 #include <fcntl.h>
 #include <sodium.h>
 #include <sodium/crypto_generichash.h>
@@ -8,6 +7,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "../include/key_utils.h"
 
 int load_key(const char* key_path, unsigned char* key, size_t key_len) {
     int fd;

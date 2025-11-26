@@ -1,3 +1,6 @@
+#ifndef KEY_UTILS_H
+#define KEY_UTILS_H
+
 #include <stddef.h>
 
 #include "ui_utils.h"
@@ -48,3 +51,5 @@ int load_or_create_asymmetric_key_pair(
     unsigned char* pub_key, 
     size_t pub_key_len
 );
+
+#endif // KEY_UTILS_H

@@ -1,6 +1,6 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -O2 -Iinclude -DUSE_WS
-LDFLAGS=-lsodium -lcurl -lwebsockets
+LDFLAGS=-lsodium -lcurl -lwebsockets # -lssl -lcrypto
 BUILD_DIR = bin
 OBJ_DIR = obj
 SRC_DIR = src
@@ -18,7 +18,7 @@ $(OBJ_DIR):
 	mkdir -p $@
 
 $(EXECUTABLE): $(OBJECTS) | $(BUILD_DIR)
-	$(CC) $(LDFLAGS) $^ -o $@
+	$(CC)  $^ -o $@ $(LDFLAGS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@

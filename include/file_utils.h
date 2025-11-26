@@ -1,3 +1,6 @@
+#ifndef FILE_UTILS_H
+#define FILE_UTILS_H
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -78,3 +81,5 @@ int decrypt_file_asymmetric(
     const char* dec_path, 
     int dec_all
 );
+
+#endif // FILE_UTILS_H

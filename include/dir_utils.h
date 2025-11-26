@@ -1,8 +1,15 @@
+#ifndef DIR_UTILS_H
+#define DIR_UTILS_H
+
 #include <curl/curl.h>
 #include <sodium/crypto_box.h>
 #include <string.h>
 
-#include "../include/file_utils.h"
+#include "file_utils.h"
+
+#ifdef USE_WS
+#include "send_utils.h"
+#endif
 
 typedef struct processed_node {
     char *name;
@@ -14,9 +21,7 @@ typedef struct {
     key_mode_config_t *cf;
 
 #ifdef USE_WS
-    const char **ws_files;
-    int ws_count;
-    int ws_cap;
+    ws_client_t *ws;
 #endif
 
 } send_ctx_t;
@@ -44,12 +49,6 @@ int monitor(
     void* ctx
 );
 
-int monitor_and_send(
-    const char* path, 
-    int timeout_secs, 
-    send_ctx_t* sctx
-);
-
 // Callbacks
 int send_file_callback(
     const char* file_path, 
@@ -67,11 +66,16 @@ int asym_file_callback(
 );
 
 #ifdef USE_WS
-int ws_queue_add_file(
-    send_ctx_t* ctx, 
-    const char* file_path
-);
+typedef void (*monitor_tick_cb_t)(void *tick_ctx);
 
-void ws_queue_free(send_ctx_t* ctx);
+int monitor_with_tick(
+    const char *p,
+    int timeout_secs,
+    file_cb_t cb,
+    void *ctx,
+    monitor_tick_cb_t tick,
+    void *tick_ctx
+);
 #endif
 
+#endif // DIR_UTILS_H

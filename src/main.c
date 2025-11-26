@@ -169,6 +169,13 @@ int parse_args(int argc, char** argv, key_mode_config_t* cf) {
     return 0;
 }
 
+#ifdef USE_WS
+void ws_tick(void *ctx_void) {
+    ws_client_t *c = (ws_client_t*)ctx_void;
+    ws_client_service(c, 0); // small timeout
+}
+#endif
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         usage(argv[0]);
@@ -189,7 +196,10 @@ int main(int argc, char** argv) {
     // SEND MODE (file or directory, optional monitoring)
     if (strcmp(cf.mode, "send") == 0) {
         if (!cf.cert_path) {
-            fprintf(stderr, RED "[ERROR] CERT_PATH env variable not set\n" RESET);
+            fprintf(
+                stderr, 
+                RED "[ERROR] CERT_PATH env variable not set\n" RESET
+            );
             return EXIT_FAILURE;
         }
 
@@ -199,21 +209,74 @@ int main(int argc, char** argv) {
             return EXIT_FAILURE;
         }
 
-        // global TLS options for HTTPS
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
         curl_easy_setopt(curl, CURLOPT_CAINFO, cf.cert_path);
+
+#ifdef USE_WS
+        ws_client_t ws_client;
+        memset(&ws_client, 0, sizeof(ws_client));
+
+        if (cf.use_ws) {
+            const char *key_path = NULL;
+            if (cf.key_mode) {
+                if (strcmp(cf.key_mode, "symmetric") == 0)
+                    key_path = cf.sym_key_path ? cf.sym_key_path : DEFAULT_SYM_KEY_PATH;
+                else
+                    key_path = cf.public_key_path ? cf.public_key_path : DEFAULT_PUB_KEY_PATH;
+            }
+
+            if (ws_client_init(
+                &ws_client,
+                cf.url,
+                "pi",
+                cf.cert_path,
+                cf.key_mode,   // may be NULL
+                key_path,
+                cf.on_all) != 0) {
+                fprintf(stderr, RED "[ERROR] ws_client_init failed\n" RESET);
+                curl_easy_cleanup(curl);
+                return EXIT_FAILURE;
+            }
+        }
+#endif
 
         send_ctx_t sctx = {0};
         sctx.cf   = &cf;
         sctx.curl = curl;
 
-        int ret = monitor_and_send(cf.init_path, cf.timeout_secs, &sctx);
+#ifdef USE_WS
+        sctx.ws   = cf.use_ws ? &ws_client : NULL;
+#endif
 
-#ifndef USE_WS
-        if (ret == 0 && cf.timeout_secs > 0 && !cf.use_ws) {
-            send_end_signal_via_https(curl, cf.url, cf.cert_path);
+        int ret = 0;
+
+        if (!cf.use_ws) {
+            // HTTPS
+            ret = monitor(cf.init_path, cf.timeout_secs, send_file_callback, &sctx);
+            if (ret == 0 && cf.timeout_secs > 0) send_end_signal_via_https(curl, cf.url, cf.cert_path);
+        } else {
+    #ifdef USE_WS
+            // WS
+            ret = monitor_with_tick(
+                cf.init_path,
+                cf.timeout_secs,
+                send_file_callback,
+                &sctx,
+                ws_tick,
+                &ws_client
+            );
+
+            // no more files will be enqueued and flush "end"
+            ws_client_mark_done(&ws_client);
+            while (ws_client.connected) {
+                ws_client_service(&ws_client, 100);
+            }
+#endif
         }
+
+#ifdef USE_WS
+        if (cf.use_ws) ws_client_destroy(&ws_client);
 #endif
 
         curl_easy_cleanup(curl);

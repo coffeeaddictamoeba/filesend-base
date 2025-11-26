@@ -32,32 +32,6 @@ void free_processed(processed_node_t *head) {
     }
 }
 
-#ifdef USE_WS
-int ws_queue_add_file(send_ctx_t *ctx, const char* file_path) {
-    if (ctx->ws_count == ctx->ws_cap) {
-        int new_cap = ctx->ws_cap ? ctx->ws_cap * 2 : 8;
-        const char **new_arr = realloc(ctx->ws_files, new_cap * sizeof(*new_arr));
-        if (!new_arr) {
-            fprintf(stderr, "[ERROR] ws_queue_add_file: out of memory\n");
-            return -1;
-        }
-        ctx->ws_files = new_arr;
-        ctx->ws_cap = new_cap;
-    }
-    ctx->ws_files[ctx->ws_count++] = strdup(file_path);
-    return 0;
-}
-
-void ws_queue_free(send_ctx_t* ctx) {
-    for (int i = 0; i < ctx->ws_count; ++i) {
-        free((void*)ctx->ws_files[i]);
-    }
-    free(ctx->ws_files);
-    ctx->ws_files = NULL;
-    ctx->ws_count = ctx->ws_cap = 0;
-}
-#endif
-
 // Generic path handler: if file -> call callback once,
 // if dir -> process files, and (if timeout > 0) monitor until no new files appear.
 int monitor(const char* p, int timeout_secs, file_cb_t cb, void* ctx) {
@@ -153,53 +127,106 @@ int monitor(const char* p, int timeout_secs, file_cb_t cb, void* ctx) {
     return ret;
 }
 
-int monitor_and_send(const char* path, int timeout_secs, send_ctx_t* sctx) {
-    int ret = monitor(path, timeout_secs, send_file_callback, sctx);
-
 #ifdef USE_WS
-    if (sctx->cf->use_ws && sctx->ws_count > 0) {
-        key_mode_config_t *cf = sctx->cf;
-        int ws_ret = 0;
+int monitor_with_tick(const char* p, int timeout_secs, file_cb_t cb, void* ctx, monitor_tick_cb_t tick, void* tick_ctx) {
+    struct stat st;
+    if (stat(p, &st) != 0) {
+        perror("[ERROR] stat");
+        return -1;
+    }
 
-        if (!cf->key_mode) {
-            ws_ret = send_files_via_ws(
-                cf->url,
-                "pi",
-                sctx->ws_files,
-                sctx->ws_count,
-                cf->cert_path
-            );
-        } else {
-            const char *key_path = NULL;
-            if (strcmp(cf->key_mode, "symmetric") == 0)
-                key_path = cf->sym_key_path;
-            else
-                key_path = cf->public_key_path;
+    // Single file: just process and return
+    if (S_ISREG(st.st_mode)) {
+        int r = cb(p, ctx);
+        // one “tick” for WS if desired
+        if (tick) tick(tick_ctx);
+        return r;
+    }
 
-            ws_ret = send_encrypted_files_via_ws(
-                cf->url,
-                "pi",
-                sctx->ws_files,
-                sctx->ws_count,
-                cf->cert_path,
-                cf->key_mode,
-                key_path,
-                cf->on_all
-            );
+    if (!S_ISDIR(st.st_mode)) {
+        fprintf(stderr, "[ERROR] %s is neither file nor directory\n", p);
+        return -1;
+    }
+
+    processed_node_t *processed = NULL;
+    time_t last_new = time(NULL);
+    int timeout = timeout_secs;
+    int ret = 0;
+
+    for (;;) {
+        int new_in_this_round = 0;
+        DIR *dir = opendir(p);
+        if (!dir) {
+            perror("[ERROR] opendir");
+            ret = -1;
+            break;
         }
 
-        if (ws_ret != 0) ret = -1;
-        ws_queue_free(sctx);
-    }
-#endif
+        struct dirent *ent;
+        char path_buf[PATH_MAX];
 
+        while ((ent = readdir(dir)) != NULL) {
+            if (strcmp(ent->d_name, ".")  == 0 ||
+                strcmp(ent->d_name, "..") == 0) {
+                continue;
+            }
+
+            snprintf(path_buf, sizeof(path_buf), "%s/%s", p, ent->d_name);
+
+            struct stat fst;
+            if (stat(path_buf, &fst) != 0) {
+                perror("[WARN] stat entry");
+                ret = -1;
+                continue;
+            }
+
+            if (!S_ISREG(fst.st_mode)) continue;
+
+            if (is_processed(processed, ent->d_name)) continue;
+
+            fprintf(stdout, "[INFO] Processing file: %s\n", path_buf);
+
+            int r = cb(path_buf, ctx);
+            mark_processed(&processed, ent->d_name);
+            new_in_this_round = 1;
+            last_new = time(NULL);
+
+            if (r != 0) {
+                fprintf(stderr, "[WARN] Failed to process %s\n", path_buf);
+                ret = -1;
+            }
+        }
+
+        closedir(dir);
+
+        if (tick) tick(tick_ctx);
+
+        if (timeout <= 0) {
+            sleep(1);
+            continue;
+        }
+
+        time_t now = time(NULL);
+        if (!new_in_this_round && (now - last_new) >= timeout) {
+            fprintf(stdout,
+                    "[INFO] No new files for %d seconds, stopping.\n",
+                    timeout);
+            break;
+        }
+
+        sleep(1);
+    }
+
+    free_processed(processed);
     return ret;
 }
+#endif
 
 int send_file_callback(const char *file_path, void *ctx_void) {
     send_ctx_t *ctx = (send_ctx_t*)ctx_void;
     key_mode_config_t *cf = ctx->cf;
 
+    // HTTPS path: send immediately
     if (!cf->use_ws) {
         if (!cf->key_mode) {
             return send_file_via_https(ctx->curl, cf->url, file_path, cf->cert_path);
@@ -220,24 +247,25 @@ int send_file_callback(const char *file_path, void *ctx_void) {
             cf->key_mode,
             cf->on_all
         );
-    } else {
+    }
+
 #ifdef USE_WS
-        if (ws_queue_add_file(ctx, file_path) != 0) {
-            fprintf(
-                stderr, 
-                "[ERROR] Failed to queue file %s for WS\n", file_path
-            );
-            return -1;
-        }
-        return 0;
-#else
+    // WS path: enqueue file for persistent client
+    if (!ctx->ws) {
         fprintf(
             stderr, 
-            "[ERROR] WebSocket is not enabled\n"
+            "[ERROR] WS client not initialized in send_ctx\n"
         );
         return -1;
-#endif
     }
+    return ws_client_enqueue_file(ctx->ws, file_path);
+#else
+    fprintf(
+        stderr, 
+        "[ERROR] WebSocket is not enabled\n"
+    );
+    return -1;
+#endif
 }
 
 // For encrypt/decrypt with symmetric key
