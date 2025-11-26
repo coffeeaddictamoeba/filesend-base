@@ -488,6 +488,9 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
                 fprintf(stderr, RED "[ERROR] Failed to encrypt file %s (symmetric)\n" RESET, file_path);
                 return -1;
             }
+
+            fprintf(stderr, GREEN "[SUCCESS] File %s was encrypted and sent successfully (symmetric)\n" RESET, file_path);
+
         } else if (strcmp(c->key_mode, "asymmetric") == 0) {
             const char *pub = (c->key_path[0]) ? c->key_path : DEFAULT_PUB_KEY_PATH;
             const char *pr  = DEFAULT_SYM_KEY_PATH;
@@ -501,6 +504,8 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
                 fprintf(stderr, RED "[ERROR] Failed to encrypt file %s (asymmetric)\n" RESET, file_path);
                 return -1;
             }
+
+            fprintf(stderr, GREEN "[SUCCESS] File %s was encrypted and sent successfully (asymmetric)\n" RESET, file_path);
         }
     }
 
@@ -538,6 +543,8 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
     if (c->wsi) {
         lws_callback_on_writable(c->wsi);
     }
+
+    fprintf(stderr, GREEN "[SUCCESS] File %s was sent successfully (no encryption)\n" RESET, file_path);
 
     return 0;
 }
@@ -640,6 +647,8 @@ int ws_client_service(ws_client_t *c, int timeout_ms) {
 
         lws_callback_on_writable(c->wsi);
     }
+
+    c->connected = (state.current_file < state.file_count); // if last file was sent, end the connection
 
     return rc;
 }
