@@ -22,7 +22,7 @@ void usage(const char* prog) {
         stderr,
         "Usage:\n"
         "  %s send  [--https|--ws]  <path> <url> "
-        "[--encrypt symmetric|asymmetric] [--all] [--timeout <n>]\n"
+        "[--encrypt symmetric|asymmetric] [--all] [--timeout <n>] [--retry <n>] [--no-retry]\n"
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
         "[--dest <file>] [--timeout <n>]\n"
         "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
@@ -31,7 +31,7 @@ void usage(const char* prog) {
     );
 }
 
-int parse_args(int argc, char** argv, key_mode_config_t* cf) {
+int parse_args(int argc, char** argv, filesend_config_t* cf) {
     if (argc < 3) {
         usage(argv[0]);
         return -1;
@@ -39,8 +39,10 @@ int parse_args(int argc, char** argv, key_mode_config_t* cf) {
 
     memset(cf, 0, sizeof(*cf));
 
-    cf->mode      = argv[1];
-    cf->timeout_secs = 0;   // default: no monitoring
+    cf->mode          = argv[1];
+    cf->timeout_secs  = 0;       // default: no monitoring
+    cf->max_retries   = 3;
+    cf->retry_enabled = 1;
 
     // envs
     cf->public_key_path  = getenv(PUB_KEY_ENV);
@@ -96,6 +98,19 @@ int parse_args(int argc, char** argv, key_mode_config_t* cf) {
                 }
                 cf->timeout_secs = atoi(argv[++i]);
                 if (cf->timeout_secs < 0) cf->timeout_secs = 0;
+            } else if (strcmp(arg, "--retry") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(
+                        stderr,
+                        RED "[ERROR] --retry requires integer seconds\n" RESET
+                    );
+                    return -1;
+                }
+                cf->max_retries = abs(atoi(argv[++i]));
+                cf->retry_enabled = 1;
+            } else if (strcmp(arg, "--no-retry") == 0) {
+                cf->max_retries = 1; // effectively "no retry", 1 attempt
+                cf->retry_enabled = 0;
             } else {
                 fprintf(
                     stderr,
@@ -170,9 +185,17 @@ int parse_args(int argc, char** argv, key_mode_config_t* cf) {
 }
 
 #ifdef USE_WS
-void ws_tick(void *ctx_void) {
-    ws_client_t *c = (ws_client_t*)ctx_void;
-    ws_client_service(c, 0); // small timeout
+void ws_tick(void *ctx) {
+    ws_client_t *client = (ws_client_t *)ctx;
+    if (!client || !client->connected) return;
+
+    // Pump libwebsockets a bunch of times non-blocking.
+    // This decouples sending speed from the directory polling timeout.
+    for (int i = 0; i < 50; ++i) {   // tune 10/50/100 as you need
+        if (!client->connected) break;
+        int rc = ws_client_service(client, 0);  // 0ms -> non-blocking
+        if (rc < 0) break;
+    }
 }
 #endif
 
@@ -182,8 +205,10 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    key_mode_config_t cf;
+    filesend_config_t cf;
     if (parse_args(argc, argv, &cf) != 0) return EXIT_FAILURE;
+
+    send_set_retry_options(cf.retry_enabled, cf.max_retries);
 
     if (sodium_init() < 0) {
         fprintf(
@@ -258,6 +283,8 @@ int main(int argc, char** argv) {
         } else {
     #ifdef USE_WS
             // WS
+            time_t start_time = time(NULL);
+
             ret = monitor_with_tick(
                 cf.init_path,
                 cf.timeout_secs,
@@ -271,6 +298,17 @@ int main(int argc, char** argv) {
             ws_client_mark_done(&ws_client);
             while (ws_client.connected) {
                 ws_client_service(&ws_client, 100);
+
+                if (cf.timeout_secs > 0) {
+                    time_t now = time(NULL);
+                    if (now - start_time >= cf.timeout_secs) {
+                        fprintf(stderr,
+                            "[WS] HARD TIMEOUT reached (%d seconds). Forcing exit.\n",
+                            cf.timeout_secs
+                        );
+                        break;
+                    }
+                }
             }
 #endif
         }
@@ -278,7 +316,6 @@ int main(int argc, char** argv) {
 #ifdef USE_WS
         if (cf.use_ws) ws_client_destroy(&ws_client);
 #endif
-
         curl_easy_cleanup(curl);
         return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
     }

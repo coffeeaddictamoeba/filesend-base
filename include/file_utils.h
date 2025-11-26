@@ -12,22 +12,26 @@
 #define CHUNK_SIZE  4096
 
 typedef struct {
-    char *mode;          // "send" / "encrypt" / "decrypt"
-    char *init_path;     // file or directory
-    char *dest_path;     // for encrypt/decrypt (file or dir)
+    char* mode;          // "send" / "encrypt" / "decrypt"
+    char* init_path;     // file or directory
+    char* dest_path;     // for encrypt/decrypt (file or dir)
 
-    char *url;           // send mode
+    char* url;           // send mode
 
-    char *key_mode;      // "symmetric" / "asymmetric" or NULL
+    char* key_mode;      // "symmetric" / "asymmetric" or NULL
+
+    char* public_key_path;
+    char* private_key_path;
+    char* sym_key_path;
+    char* cert_path;
+
     int   on_all;        // metadata flag
     int   timeout_secs;  // 0 = no monitoring, >0 = watch dir
     int   use_ws;        // 0 = use https, >0 = use websocket
 
-    char *public_key_path;
-    char *private_key_path;
-    char *sym_key_path;
-    char *cert_path;
-} key_mode_config_t;
+    int  retry_enabled;   // 0 = no retry, 1 = allow retry
+    int  max_retries;     // how many attempts per file (total)
+} filesend_config_t;
 
 typedef struct {
     uint64_t size;

@@ -3,9 +3,13 @@
 
 #include <curl/curl.h>
 
-#ifdef USE_WS
-#include <libwebsockets.h>
-#endif
+extern int g_retry_enabled;
+extern int g_max_retries;
+
+inline void send_set_retry_options(int enabled, int max_retries) {
+    g_retry_enabled = enabled ? 1 : 0;
+    g_max_retries   = (max_retries < 1) ? 1 : max_retries;
+}
 
 int send_file_via_https(
     CURL* curl,
@@ -31,6 +35,7 @@ int send_end_signal_via_https(
 );
 
 #ifdef USE_WS
+#include <libwebsockets.h>
 
 #define SEND_CHUNK_SIZE 65536
 
@@ -46,26 +51,29 @@ typedef struct {
 typedef struct {
     struct lws_context *ctx;
     struct lws *wsi;
+
     int connected;
 
-    // Config
     char device_id[64];
-    char url[512];
-    char ca_path[512];   // may be empty
-    char key_mode[16];   // "", "symmetric", "asymmetric"
-    char key_path[512];  // path to key / pubkey
-    int  enc_all;
+    char url[256];
+    char ca_path[256];
 
-    // File queue
-    char **files;
-    int file_count;
-    int file_cap;
-    int current_file;
-    int phase;           // 0=header,1=chunks,2=file_end,3=wait_reply
-    FILE *fp;
+    char key_mode[16];     // "" | "symmetric" | "asymmetric"
+    char key_path[256];    // path to key (if any)
+    int  enc_all;          // encrypt metadata flag
 
-    int done_flag;       // monitor says "no more files will come"
-    int end_sent;        // we have sent {"type":"end"}
+    // queue of files
+    char  **files;
+    int     file_count;
+    int     file_cap;
+
+    // per-file status
+    int *sent_ok;          // 1 if ACKed or skipped
+    int *retries;          // how many attempts
+
+    int done_flag;         // dir monitor finished, no new files
+    int end_sent;          // {"type":"end"} already sent
+
 } ws_client_t;
 
 int  ws_client_init(

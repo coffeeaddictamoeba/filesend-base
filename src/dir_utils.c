@@ -224,7 +224,7 @@ int monitor_with_tick(const char* p, int timeout_secs, file_cb_t cb, void* ctx, 
 
 int send_file_callback(const char *file_path, void *ctx_void) {
     send_ctx_t *ctx = (send_ctx_t*)ctx_void;
-    key_mode_config_t *cf = ctx->cf;
+    filesend_config_t *cf = ctx->cf;
 
     // HTTPS path: send immediately
     if (!cf->use_ws) {
@@ -271,7 +271,7 @@ int send_file_callback(const char *file_path, void *ctx_void) {
 // For encrypt/decrypt with symmetric key
 int sym_file_callback(const char *file_path, void *ctx_void) {
     sym_ctx_t *ctx = (sym_ctx_t*)ctx_void;
-    key_mode_config_t *cf = ctx->cf;
+    filesend_config_t *cf = ctx->cf;
 
     // For directory mode, we simply do in-place by default
     const char *dest = file_path;
@@ -291,7 +291,7 @@ int sym_file_callback(const char *file_path, void *ctx_void) {
 // For encrypt/decrypt with asymmetric key
 int asym_file_callback(const char *file_path, void *ctx_void) {
     asym_ctx_t *ctx = (asym_ctx_t*)ctx_void;
-    key_mode_config_t *cf = ctx->cf;
+    filesend_config_t *cf = ctx->cf;
 
     const char *dest = file_path;
     if (cf->dest_path && strcmp(cf->init_path, cf->dest_path) != 0) {

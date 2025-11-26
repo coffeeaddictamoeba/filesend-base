@@ -23,6 +23,23 @@ async def handle_client(ws):
     current_enc_path = None
     current_device_id = "unknown"
 
+    # Track per-connection results
+    ok_files = []       # list of dicts: {"enc": ..., "dec": ...}
+    failed_files = []   # list of enc paths (or filenames)
+
+    def print_summary(tag="summary"):
+        ok_count = len(ok_files)
+        fail_count = len(failed_files)
+        log(f"[WS] {tag}: {ok_count} files OK, {fail_count} files FAILED")
+        if ok_files:
+            log("[WS] Successfully received & decrypted files:")
+            for f in ok_files:
+                log(f"   OK  enc={f['enc']}  dec={f['dec']}")
+        if failed_files:
+            log("[WS] Files with errors (decrypt or other):")
+            for enc in failed_files:
+                log(f"   FAIL enc={enc}")
+
     try:
         async for msg in ws:
             try:
@@ -61,6 +78,9 @@ async def handle_client(ws):
                                 "type": "error",
                                 "msg": "no open file on file_end"
                             }))
+                            # mark as failed if we at least know enc path
+                            if current_enc_path:
+                                failed_files.append(current_enc_path)
                             continue
 
                         current_file.close()
@@ -81,6 +101,10 @@ async def handle_client(ws):
                                 dec_path,
                             ])
                             log(f"[WS] Decrypted to: {dec_path}")
+                            ok_files.append({
+                                "enc": current_enc_path,
+                                "dec": dec_path,
+                            })
                             await ws.send(json.dumps({
                                 "type": "file_done",
                                 "enc_path": current_enc_path,
@@ -88,6 +112,7 @@ async def handle_client(ws):
                             }))
                         except subprocess.CalledProcessError as e:
                             log(f"[WS] Decrypt failed:", e)
+                            failed_files.append(current_enc_path)
                             await ws.send(json.dumps({
                                 "type": "error",
                                 "msg": "decrypt failed"
@@ -95,13 +120,14 @@ async def handle_client(ws):
 
                     elif msg_type == "end":
                         log(f"[WS] End signal from device {current_device_id}")
+                        print_summary("final summary (on end)")
                         await ws.send(json.dumps({"type": "end_ack"}))
                         break
 
                     else:
                         log("[WS] Unknown message type:", data)
 
-                # file content
+                # file content (binary)
                 else:
                     if current_file is None:
                         log("[WS] Binary received but no file open")
@@ -111,6 +137,8 @@ async def handle_client(ws):
             except Exception as e:
                 log("[WS] Exception while handling message:", e)
                 traceback.print_exc()
+                if current_enc_path:
+                    failed_files.append(current_enc_path)
                 await ws.send(json.dumps({
                     "type": "error",
                     "msg": "internal server error"
@@ -124,6 +152,8 @@ async def handle_client(ws):
     finally:
         if current_file:
             current_file.close()
+        # If we didn’t get an explicit "end", still show what we got so far
+        print_summary("summary (on close)")
         log("[WS] Handler finished")
 
 async def main():

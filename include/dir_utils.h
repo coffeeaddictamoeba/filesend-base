@@ -18,7 +18,7 @@ typedef struct processed_node {
 
 typedef struct {
     CURL *curl;
-    key_mode_config_t *cf;
+    filesend_config_t *cf;
 
 #ifdef USE_WS
     ws_client_t *ws;
@@ -27,12 +27,12 @@ typedef struct {
 } send_ctx_t;
 
 typedef struct {
-    key_mode_config_t *cf;
+    filesend_config_t *cf;
     unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
 } sym_ctx_t;
 
 typedef struct {
-    key_mode_config_t *cf;
+    filesend_config_t *cf;
     unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
     unsigned char pr_key[crypto_box_SECRETKEYBYTES]; // only used for decrypt
     int is_decrypt;                                  // 0 = encrypt, 1 = decrypt
