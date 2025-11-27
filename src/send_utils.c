@@ -55,7 +55,7 @@ int send_file_via_https(CURL* curl, const char* url, const char* file_path, cons
         if (res != CURLE_OK) {
             fprintf(
                 stderr,
-                "[ERROR] curl_easy_perform() failed for %s (attempt %d/%d): %s\n",
+                RED "[ERROR] curl_easy_perform() failed for %s (attempt %d/%d): %s\n" RESET,
                 file_path, attempts, max_attempts, curl_easy_strerror(res)
             );
             ret = -1;
@@ -65,14 +65,14 @@ int send_file_via_https(CURL* curl, const char* url, const char* file_path, cons
             if (http_code == 200 || http_code == 201) {
                 fprintf(
                     stderr,
-                    "[SUCCESS] Server successfully received file %s\n", file_path
+                    GREEN "[SUCCESS] Server successfully received file %s\n" RESET, file_path
                 );
                 curl_mime_free(mime);
                 return 0; // success
             } else {
                 fprintf(
                     stderr,
-                    "[ERROR] Server returned HTTP %ld for %s (attempt %d/%d)\n",
+                    RED "[ERROR] Server returned HTTP %ld for %s (attempt %d/%d)\n" RESET,
                     http_code, file_path, attempts, max_attempts
                 );
                 ret = -1;
@@ -208,7 +208,7 @@ int ws_ensure_status_arrays(ws_client_t *c, int new_cap) {
     int *new_ok = realloc(c->sent_ok, new_cap * sizeof(int));
     int *new_rt = realloc(c->retries, new_cap * sizeof(int));
     if (!new_ok || !new_rt) {
-        fprintf(stderr, "[WS] Out of memory for status arrays\n");
+        fprintf(stderr, RED "[WS] Out of memory for status arrays\n" RESET);
         free(new_ok);
         free(new_rt);
         return -1;
@@ -227,7 +227,7 @@ int ws_ensure_status_arrays(ws_client_t *c, int new_cap) {
 int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len) {
     switch(reason) {
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
-            lwsl_user("[WS] Connected to server\n");
+            lwsl_user(GREEN "[WS] Connected to server\n" RESET);
             if (g_ws_client) g_ws_client->connected = 1;
             lws_callback_on_writable(wsi);
             break;
@@ -241,7 +241,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, v
                     size_t n = strlen(msg);
                     unsigned char *buf = malloc(LWS_PRE + n);
                     if (!buf) {
-                        lwsl_err("[WS] OOM sending end\n");
+                        lwsl_err(RED "[WS] OOM sending end\n" RESET);
                         return -1;
                     }
                     memcpy(&buf[LWS_PRE], msg, n);
@@ -271,7 +271,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, v
                 size_t n = strlen(json);
                 unsigned char *buf = malloc(LWS_PRE + n);
                 if (!buf) {
-                    lwsl_err("[WS] OOM sending header\n");
+                    lwsl_err(RED "[WS] OOM sending header\n" RESET);
                     return -1;
                 }
                 memcpy(&buf[LWS_PRE], json, n);
@@ -283,7 +283,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, v
                 // open file
                 state.fp = fopen(path, "rb");
                 if (!state.fp) {
-                    lwsl_err("[WS] Failed to open file %s\n", path);
+                    lwsl_err(RED "[WS] Failed to open file %s\n" RESET, path);
                     return -1;
                 }
 
@@ -299,7 +299,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, v
                 if (r > 0) {
                     unsigned char *buf = malloc(LWS_PRE + r);
                     if (!buf) {
-                        lwsl_err("[WS] OOM sending data\n");
+                        lwsl_err(RED "[WS] OOM sending data\n" RESET);
                         return -1;
                     }
                     memcpy(&buf[LWS_PRE], buf_raw, r);
@@ -325,7 +325,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, v
                 size_t n = strlen(json);
                 unsigned char *buf = malloc(LWS_PRE + n);
                 if (!buf) {
-                    lwsl_err("[WS] OOM sending file_end\n");
+                    lwsl_err(RED "[WS] OOM sending file_end\n" RESET);
                     return -1;
                 }
                 memcpy(&buf[LWS_PRE], json, n);
@@ -357,7 +357,7 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, v
             break;
 
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-            lwsl_err("[WS] Connection error\n");
+            lwsl_err(RED "[WS] Connection error\n" RESET);
             if (g_ws_client) g_ws_client->connected = 0;
             break;
 
@@ -369,6 +369,74 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, v
         default:
             break;
     }
+    return 0;
+}
+
+int ws_create_connection(ws_client_t *c, int reconnect, int s) {
+    if (s) sleep(s);
+
+    struct lws_client_connect_info ccinfo;
+    memset(&ccinfo, 0, sizeof(ccinfo));
+    ccinfo.context = c->ctx;
+
+    int use_ssl = 0;
+    const char *p = NULL;
+
+    if (strncmp(c->url, "wss://", 6) == 0) {
+        use_ssl = 1;
+        p = c->url + 6;
+    } else if (strncmp(c->url, "ws://", 5) == 0) {
+        use_ssl = 0;
+        p = c->url + 5;
+    } else {
+        fprintf(
+            stderr, 
+            RED "[WS] URL must start with ws:// or wss://: %s\n" RESET, c->url
+        );
+        return -1;
+    }
+
+    char host[256];
+    const char *slash = strchr(p, '/');
+    const char *colon = strchr(p, ':');
+    if (!slash) slash = p + strlen(p);
+
+    if (colon && colon < slash) {
+        size_t host_len = (size_t)(colon - p);
+        if (host_len >= sizeof(host)) host_len = sizeof(host)-1;
+        memcpy(host, p, host_len);
+        host[host_len] = '\0';
+
+        ccinfo.address = strdup(host);
+        ccinfo.host    = ccinfo.address;
+        ccinfo.port    = atoi(colon + 1);
+        ccinfo.path    = (*slash ? slash : "/");
+    } else {
+        size_t host_len = (size_t)(slash - p);
+        if (host_len >= sizeof(host)) host_len = sizeof(host)-1;
+        memcpy(host, p, host_len);
+        host[host_len] = '\0';
+
+        ccinfo.address = strdup(host);
+        ccinfo.host    = ccinfo.address;
+        ccinfo.path    = (*slash ? slash : "/");
+    }
+
+    if (use_ssl && c->ca_path[0] != '\0') {
+        ccinfo.ssl_connection = LCCSCF_USE_SSL;
+    }
+
+    c->wsi = lws_client_connect_via_info(&ccinfo);
+    if (!c->wsi) {
+        char* m = reconnect ? "Reconnection failed" : "Connection failed";
+        fprintf(
+            stderr, 
+            RED "[WS] %s\n" RESET, m
+        );
+        return reconnect ? 0 : -1;
+    }
+
+    c->connected = 1;
     return 0;
 }
 
@@ -410,67 +478,11 @@ int ws_client_init(ws_client_t *c, const char *ws_url, const char *device_id, co
 
     c->ctx = lws_create_context(&info);
     if (!c->ctx) {
-        fprintf(stderr, "[WS] Failed to create context\n");
+        fprintf(stderr, RED "[WS] Failed to create context\n" RESET);
         return -1;
     }
 
-    // parse ws:// / wss://
-    struct lws_client_connect_info ccinfo;
-    memset(&ccinfo, 0, sizeof(ccinfo));
-    ccinfo.context = c->ctx;
-
-    int use_ssl = 0;
-    const char *p = NULL;
-
-    if (strncmp(c->url, "wss://", 6) == 0) {
-        use_ssl = 1;
-        p = c->url + 6;
-    } else if (strncmp(c->url, "ws://", 5) == 0) {
-        use_ssl = 0;
-        p = c->url + 5;
-    } else {
-        fprintf(stderr, "[WS] URL must start with ws:// or wss://: %s\n", c->url);
-        return -1;
-    }
-
-    char host[256];
-    const char *slash = strchr(p, '/');
-    const char *colon = strchr(p, ':');
-    if (!slash) slash = p + strlen(p);
-
-    if (colon && colon < slash) {
-        size_t host_len = (size_t)(colon - p);
-        if (host_len >= sizeof(host)) host_len = sizeof(host)-1;
-        memcpy(host, p, host_len);
-        host[host_len] = '\0';
-
-        ccinfo.address = strdup(host);
-        ccinfo.host    = ccinfo.address;
-        ccinfo.port    = atoi(colon + 1);
-        ccinfo.path    = (*slash ? slash : "/");
-    } else {
-        size_t host_len = (size_t)(slash - p);
-        if (host_len >= sizeof(host)) host_len = sizeof(host)-1;
-        memcpy(host, p, host_len);
-        host[host_len] = '\0';
-
-        ccinfo.address = strdup(host);
-        ccinfo.host    = ccinfo.address;
-        ccinfo.path    = (*slash ? slash : "/");
-    }
-
-    if (use_ssl && c->ca_path[0] != '\0') {
-        ccinfo.ssl_connection = LCCSCF_USE_SSL;
-    }
-
-    c->wsi = lws_client_connect_via_info(&ccinfo);
-    if (!c->wsi) {
-        fprintf(stderr, "[WS] Connection failed\n");
-        return -1;
-    }
-
-    c->connected = 1;
-    return 0;
+    return ws_create_connection(c, 0, 0);
 }
 
 int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
@@ -489,8 +501,6 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
                 return -1;
             }
 
-            fprintf(stderr, GREEN "[SUCCESS] File %s was encrypted and sent successfully (symmetric)\n" RESET, file_path);
-
         } else if (strcmp(c->key_mode, "asymmetric") == 0) {
             const char *pub = (c->key_path[0]) ? c->key_path : DEFAULT_PUB_KEY_PATH;
             const char *pr  = DEFAULT_SYM_KEY_PATH;
@@ -504,8 +514,6 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
                 fprintf(stderr, RED "[ERROR] Failed to encrypt file %s (asymmetric)\n" RESET, file_path);
                 return -1;
             }
-
-            fprintf(stderr, GREEN "[SUCCESS] File %s was encrypted and sent successfully (asymmetric)\n" RESET, file_path);
         }
     }
 
@@ -514,7 +522,7 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
         int new_cap = c->file_cap ? c->file_cap * 2 : 8;
         char **n = realloc(c->files, new_cap * sizeof(char*));
         if (!n) {
-            fprintf(stderr, "[WS] Out of memory in enqueue\n");
+            fprintf(stderr, RED "[WS] Out of memory in enqueue\n" RED);
             return -1;
         }
         c->files = n;
@@ -526,7 +534,10 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
 
     c->files[c->file_count] = strdup(file_path);
     if (!c->files[c->file_count]) {
-        fprintf(stderr, "[WS] Out of memory strdup\n");
+        fprintf(
+            stderr, 
+            RED "[WS] Out of memory strdup\n" RESET
+        );
         return -1;
     }
     // ensure initial status
@@ -540,11 +551,12 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
     state.file_count = c->file_count;
 
     // ask LWS to call us when writable
-    if (c->wsi) {
-        lws_callback_on_writable(c->wsi);
-    }
+    if (c->wsi) lws_callback_on_writable(c->wsi);
 
-    fprintf(stderr, GREEN "[SUCCESS] File %s was sent successfully (no encryption)\n" RESET, file_path);
+    fprintf(
+        stderr, 
+        GREEN "[SUCCESS] File %s was sent successfully\n" RESET, file_path
+    );
 
     return 0;
 }
@@ -568,7 +580,7 @@ int ws_client_service(ws_client_t *c, int timeout_ms) {
         if (c->retries[idx] >= max_attempts) {
             fprintf(
                 stderr,
-                "[WS] File %s failed after %d retries, skipping\n", c->files[idx], max_attempts
+                RED "[WS] File %s failed after %d retries, skipping\n" RESET, c->files[idx], max_attempts
             );
             c->sent_ok[idx] = 1;
 
@@ -584,61 +596,7 @@ int ws_client_service(ws_client_t *c, int timeout_ms) {
         );
 
         // recreate connection
-        struct lws_client_connect_info ccinfo;
-        memset(&ccinfo, 0, sizeof(ccinfo));
-        ccinfo.context = c->ctx;
-
-        int use_ssl = 0;
-        const char *p = NULL;
-
-        if (strncmp(c->url, "wss://", 6) == 0) {
-            use_ssl = 1;
-            p = c->url + 6;
-        } else if (strncmp(c->url, "ws://", 5) == 0) {
-            use_ssl = 0;
-            p = c->url + 5;
-        } else {
-            fprintf(stderr, "[WS] URL must start with ws:// or wss://: %s\n", c->url);
-            return -1;
-        }
-
-        char host[256];
-        const char *slash = strchr(p, '/');
-        const char *colon = strchr(p, ':');
-        if (!slash) slash = p + strlen(p);
-
-        if (colon && colon < slash) {
-            size_t host_len = (size_t)(colon - p);
-            if (host_len >= sizeof(host)) host_len = sizeof(host)-1;
-            memcpy(host, p, host_len);
-            host[host_len] = '\0';
-
-            ccinfo.address = strdup(host);
-            ccinfo.host    = ccinfo.address;
-            ccinfo.port    = atoi(colon + 1);
-            ccinfo.path    = (*slash ? slash : "/");
-        } else {
-            size_t host_len = (size_t)(slash - p);
-            if (host_len >= sizeof(host)) host_len = sizeof(host)-1;
-            memcpy(host, p, host_len);
-            host[host_len] = '\0';
-
-            ccinfo.address = strdup(host);
-            ccinfo.host    = ccinfo.address;
-            ccinfo.path    = (*slash ? slash : "/");
-        }
-
-        if (use_ssl && c->ca_path[0] != '\0') {
-            ccinfo.ssl_connection = LCCSCF_USE_SSL;
-        }
-
-        c->wsi = lws_client_connect_via_info(&ccinfo);
-        if (!c->wsi) {
-            fprintf(stderr, "[WS] Reconnection failed\n");
-            return 0; // will try again on next service
-        }
-
-        c->connected = 1;
+        ws_create_connection(c, 1, 5); // test with different sleep times for reconnection
         state.current_file = idx;
         state.phase = 0;
         state.files = (const char**)c->files;

@@ -7,37 +7,40 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 ---
 
 ```
-filesend send    <path> <url> [--encrypt symmetric|asymmetric] [--all][--timeout <n>]
-filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>][--timeout <n>]
-filesend decrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>][--timeout <n>]
+filesend send    [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--all] [--timeout <n>] [--retry <n>] [--no-retry]
+filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--timeout <n>]
+filesend decrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--timeout <n>]
 ```
 
 #### Mode: `send`
 
 ---
 
-Sends a file to a remote HTTPS server.
+Sends a file to a remote HTTPS / WS server.
 
 You may choose whether to encrypt the file before sending it.
 
 ```
-filesend send <path> <url> [--encrypt symmetric|asymmetric] [--all][--timeout <n>]
+filesend send [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--all][--timeout <n>] [--retry <n>][--no-retry]
 ```
 
 **Parameters**
 
+* **`send --https|--ws`** – choose the preferrable method of file sending (HTTPS or WebSocket)
 * **`<path>`** – path to the file or directory you want to send
 * **`<url>`** – full server URL (must include `/upload`)
 
-  Example: `https://myserver.local:8443/upload`
+  Example: `https://myserver.local:8443/upload` (HTTPS) or `ws://0.0.0.0:8444/ws` (WS)
 * **`--encrypt symmetric`** – encrypt using libsodium symmetric key
 * **`--encrypt asymmetric`** – encrypt using libsodium sealed box (public key)
 * **`--all`** – encrypt file **metadata** as well as contents
 * **`--timeout`** – monitor `<path>` directory until specified timeout
+* **`--retry <n>`** – set the number of retries allowed in case of failed file sending. Default is 3.
+* **`--no-retry`** – sets number of retries to 0
 
 **Environment variables**
 
-`CERT_PATH` – path to CA certificate used to validate server TLS certificate
+`CERT_PATH` – path to CA certificate used to validate server TLS certificate (both HTTPS and WS)
 
 `SYM_KEY_PATH` – path to symmetric key (if symmetric mode is chosen)
 
@@ -52,18 +55,18 @@ filesend send <path> <url> [--encrypt symmetric|asymmetric] [--all][--timeout <n
 export SYM_KEY_PATH=/etc/myapp/sym.key
 export CERT_PATH=/etc/myapp/ca_cert.pem
 
-filesend send images/photo.png "https://myserver.local:8443/upload" \
+filesend send --https images/photo.png "https://myserver.local:8443/upload" \
     --encrypt symmetric
 ```
 
-- Send with asymmetric encryption and metadata protection:
+- Send from a folder (`logs`) with asymmetric encryption and metadata protection (and stop after a timeout of 30 secs):
 
 ```
 export PUB_KEY_PATH=/etc/myapp/server_box_pk.bin
 export CERT_PATH=/etc/myapp/ca_cert.pem
 
-filesend send logs/system.log "https://myserver.local:8443/upload" \
-    --encrypt asymmetric --all
+filesend send --ws logs "ws://0.0.0.0:8444/ws" \
+    --encrypt asymmetric --all --timeout 30
 ```
 
 #### Mode: `encrypt`

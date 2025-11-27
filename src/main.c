@@ -21,12 +21,9 @@ void usage(const char* prog) {
     fprintf(
         stderr,
         "Usage:\n"
-        "  %s send  [--https|--ws]  <path> <url> "
-        "[--encrypt symmetric|asymmetric] [--all] [--timeout <n>] [--retry <n>] [--no-retry]\n"
-        "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>]\n"
-        "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>]\n",
+        "  %s send  [--https|--ws]  <path> <url> [--encrypt symmetric|asymmetric] [--all] [--timeout <n>] [--retry <n>] [--no-retry]\n"
+        "  %s encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--timeout <n>]\n"
+        "  %s decrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--timeout <n>]\n",
         prog, prog, prog
     );
 }
