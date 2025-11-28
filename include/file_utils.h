@@ -11,6 +11,12 @@
 
 #define CHUNK_SIZE  4096
 
+#define ENC_FLAG_ENABLED    (1u << 0)
+#define ENC_FLAG_SYMMETRIC  (1u << 1)
+#define ENC_FLAG_ALL        (1u << 2)
+#define ENC_FLAG_RESERVED1  (1u << 3)
+#define ENC_FLAG_RESERVED2  (1u << 4)
+
 typedef struct {
     char* mode;          // "send" / "encrypt" / "decrypt"
     char* init_path;     // file or directory
@@ -18,19 +24,17 @@ typedef struct {
 
     char* url;           // send mode
 
-    char* key_mode;      // "symmetric" / "asymmetric" or NULL
-
-    char* public_key_path;
-    char* private_key_path;
-    char* sym_key_path;
+    char* key_path;
+    char* dec_key_path;
     char* cert_path;
-
-    int   on_all;        // metadata flag
-    int   timeout_secs;  // 0 = no monitoring, >0 = watch dir
+    
     int   use_ws;        // 0 = use https, >0 = use websocket
 
     int  retry_enabled;   // 0 = no retry, 1 = allow retry
     int  max_retries;     // how many attempts per file (total)
+    int   timeout_secs;  // 0 = no monitoring, >0 = watch dir
+
+    uint32_t flags;      // |Res|Res|All|Sym|Enc|
 } filesend_config_t;
 
 typedef struct {

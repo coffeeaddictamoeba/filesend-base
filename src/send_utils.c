@@ -1,6 +1,7 @@
 #include <curl/curl.h>
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_secretstream_xchacha20poly1305.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -21,7 +22,7 @@ client_state_t state;
 #endif
 
 
-int send_file_via_https(CURL* curl, const char* url, const char* file_path, const char* cert) {
+int send_file_via_https(CURL* curl, const char* url, const char* file_path, const char* cert, const uint32_t flags) {
     int attempts     = 0;
     int max_attempts = g_retry_enabled ? g_max_retries : 1;
 
@@ -42,6 +43,12 @@ int send_file_via_https(CURL* curl, const char* url, const char* file_path, cons
         curl_mimepart *dev = curl_mime_addpart(mime);
         curl_mime_name(dev, "device_id");
         curl_mime_data(dev, "pi", CURL_ZERO_TERMINATED);
+
+        curl_mimepart *fl = curl_mime_addpart(mime);
+        curl_mime_name(fl, "flags");
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%u", flags);
+        curl_mime_data(fl, buf, CURL_ZERO_TERMINATED);
 
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
@@ -93,9 +100,9 @@ int send_file_via_https(CURL* curl, const char* url, const char* file_path, cons
     return -1;
 }
 
-int send_encrypted_file_via_https(CURL* curl, const char* url, const char* file_path, const char* cert, const char* key_path, const char* key_mode, int enc_all) {
+int send_encrypted_file_via_https(CURL* curl, const char* url, const char* file_path, const char* cert, const char* key_path, const uint32_t flags) {
     // Symmetric key mode
-    if (strcmp(key_mode, "symmetric") == 0) {
+    if (flags & ENC_FLAG_SYMMETRIC) {
         const char* p = (key_path == NULL) ? DEFAULT_SYM_KEY_PATH : key_path;
 
         unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
@@ -115,11 +122,11 @@ int send_encrypted_file_via_https(CURL* curl, const char* url, const char* file_
             return -1;
         }
 
-        return send_file_via_https(curl, url, file_path, cert);
+        return send_file_via_https(curl, url, file_path, cert, flags);
     }
 
     // Asymmetric key mode (public/private key)
-    else if (strcmp(key_mode, "asymmetric") == 0) {
+    else {
         const char* pub = (key_path == NULL) ? DEFAULT_PUB_KEY_PATH : key_path;
         const char* pr  = DEFAULT_SYM_KEY_PATH;  // placeholder for creation
 
@@ -132,7 +139,7 @@ int send_encrypted_file_via_https(CURL* curl, const char* url, const char* file_
             return -1;
         }
 
-        if (encrypt_file_asymmetric(pub_key, file_path, file_path, enc_all) != 0) {
+        if (encrypt_file_asymmetric(pub_key, file_path, file_path, (flags & ENC_FLAG_ALL)) != 0) {
             fprintf(
                 stderr,
                 RED "[ERROR] Failed to encrypt the file: %s (asymmetric encryption)\n" RESET, file_path
@@ -140,7 +147,7 @@ int send_encrypted_file_via_https(CURL* curl, const char* url, const char* file_
             return -1;
         }
 
-        return send_file_via_https(curl, url, file_path, cert);
+        return send_file_via_https(curl, url, file_path, cert, flags);
     }
 
     return -1; // should not reach
@@ -262,12 +269,16 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, v
             if (!filename) filename = path; else filename++;
 
             if (state.phase == 0) {
-                // send header JSON
-                char json[512];
+                char json[512]; // send header JSON
                 snprintf(
                     json, sizeof(json),
-                    "{\"type\":\"file\",\"filename\":\"%s\",\"device_id\":\"%s\"}",
-                    filename, state.device_id
+                    "{\"type\":\"file\","
+                    "\"filename\":\"%s\","
+                    "\"device_id\":\"%s\","
+                    "\"flags\":%u}",
+                    filename,
+                    state.device_id,
+                    g_ws_client->flags
                 );
 
                 size_t n = strlen(json);
@@ -447,20 +458,19 @@ int ws_create_connection(ws_client_t *c, int reconnect, int s) {
     return 0;
 }
 
-int ws_client_init(ws_client_t *c, const char *ws_url, const char *device_id, const char *cert, const char *key_mode, const char *key_path, int enc_all) {
+int ws_client_init(ws_client_t *c, const char *ws_url, const char *device_id, const char *cert, const char *key_path, const uint32_t flags) {
     memset(c, 0, sizeof(*c));
     strncpy(c->device_id, device_id ? device_id : "pi", sizeof(c->device_id)-1);
     if (ws_url)  strncpy(c->url, ws_url, sizeof(c->url)-1);
     if (cert)    strncpy(c->ca_path, cert, sizeof(c->ca_path)-1);
-    if (key_mode) strncpy(c->key_mode, key_mode, sizeof(c->key_mode)-1);
     if (key_path) strncpy(c->key_path, key_path, sizeof(c->key_path)-1);
-    c->enc_all = enc_all;
 
     c->files    = NULL;
     c->file_cap = 0;
     c->file_count = 0;
     c->sent_ok  = NULL;
     c->retries  = NULL;
+    c->flags    = flags;
 
     // reset state
     memset(&state, 0, sizeof(state));
@@ -502,8 +512,8 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
     }
 
     // Optional encryption before sending
-    if (c->key_mode[0]) {
-        if (strcmp(c->key_mode, "symmetric") == 0) {
+    if (c->flags & ENC_FLAG_ENABLED) {
+        if (c->flags & ENC_FLAG_SYMMETRIC) {
             const char *p = (c->key_path[0]) ? c->key_path : DEFAULT_SYM_KEY_PATH;
 
             unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
@@ -516,7 +526,7 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
                 return -1;
             }
 
-        } else if (strcmp(c->key_mode, "asymmetric") == 0) {
+        } else {
             const char *pub = (c->key_path[0]) ? c->key_path : DEFAULT_PUB_KEY_PATH;
             const char *pr  = DEFAULT_SYM_KEY_PATH;
 
@@ -525,7 +535,7 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
                 fprintf(stderr, RED "[ERROR] Failed to load asymmetric key\n" RESET);
                 return -1;
             }
-            if (encrypt_file_asymmetric(pub_key, file_path, file_path, c->enc_all) != 0) {
+            if (encrypt_file_asymmetric(pub_key, file_path, file_path, (c->flags & ENC_FLAG_ALL)) != 0) {
                 fprintf(stderr, RED "[ERROR] Failed to encrypt file %s (asymmetric)\n" RESET, file_path);
                 return -1;
             }
@@ -564,7 +574,7 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
     c->file_count++;
 
     // update global state to see new queue
-    state.files      = (const char**)c->files;
+    state.files = (const char**)c->files;
     state.file_count = c->file_count;
 
     // ask LWS to call us when writable
@@ -649,6 +659,7 @@ void ws_client_destroy(ws_client_t *c) {
     c->files = NULL;
     c->sent_ok = NULL;
     c->retries = NULL;
+    c->flags = 0;
     c->file_count = c->file_cap = 0;
     c->connected = 0;
     c->done_flag = 0;

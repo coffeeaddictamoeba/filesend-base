@@ -5,6 +5,8 @@
 #include <linux/limits.h>
 #include <sys/types.h>
 
+#define DB_NAME ".filesend_cache"
+
 typedef struct {
     char*  file_path;
     time_t mtime;

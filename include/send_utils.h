@@ -2,6 +2,7 @@
 #define SEND_UTILS_H
 
 #include <curl/curl.h>
+#include <stdint.h>
 
 #include "db_utils.h"
 
@@ -17,7 +18,8 @@ int send_file_via_https(
     CURL* curl,
     const char* url,
     const char* file_path,
-    const char* cert
+    const char* cert,
+    const uint32_t flags
 );
 
 int send_encrypted_file_via_https(
@@ -26,8 +28,7 @@ int send_encrypted_file_via_https(
     const char* file_path,
     const char* cert,
     const char* key_path,
-    const char* key_mode, // "symmetric" or "asymmetric"
-    int enc_all
+    const uint32_t flags
 );
 
 int send_end_signal_via_https(
@@ -61,10 +62,7 @@ typedef struct {
     char device_id[64];
     char url[256];
     char ca_path[256];
-
-    char key_mode[16];     // "" | "symmetric" | "asymmetric"
     char key_path[256];    // path to key (if any)
-    int  enc_all;          // encrypt metadata flag
 
     // queue of files
     char  **files;
@@ -78,6 +76,7 @@ typedef struct {
     int done_flag;         // dir monitor finished, no new files
     int end_sent;          // {"type":"end"} already sent
 
+    uint32_t flags;    // |Res|Res|All|Sym|Enc|
 } ws_client_t;
 
 int  ws_client_init(
@@ -85,9 +84,8 @@ int  ws_client_init(
     const char *ws_url,
     const char *device_id,
     const char *cert,
-    const char *key_mode,
     const char *key_path,
-    int enc_all
+    const uint32_t flags
 );
 
 int  ws_client_enqueue_file(ws_client_t *c, const char *file_path);
@@ -109,9 +107,8 @@ int send_encrypted_files_via_ws(
     const char** files,
     int file_count,
     const char* cert,       // CA file
-    const char* key_mode,   // "symmetric" or "asymmetric"
     const char* key_path,   // path to key / pubkey
-    int enc_all
+    const uint32_t flags
 );
 #endif // USE_WS
 

@@ -167,7 +167,8 @@ int monitor_with_tick(const char* p, int timeout_secs, file_cb_t cb, void* ctx, 
 
         while ((ent = readdir(dir)) != NULL) {
             if (strcmp(ent->d_name, ".")  == 0 ||
-                strcmp(ent->d_name, "..") == 0) {
+                strcmp(ent->d_name, "..") == 0 || 
+                strcmp(ent->d_name, DB_NAME) == 0) {
                 continue;
             }
 
@@ -234,36 +235,27 @@ int send_file_callback(const char *file_path, void *ctx_void) {
         return 0;
     }
 
-    // HTTPS path: send immediately
     if (!cf->use_ws) {
         int ret = 0;
-        if (!cf->key_mode) {
-            ret = send_file_via_https(ctx->curl, cf->url, file_path, cf->cert_path);
+        if (!(cf->flags & ENC_FLAG_ENABLED)) {
+            ret = send_file_via_https(ctx->curl, cf->url, file_path, cf->cert_path, cf->flags);
         }
-
-        const char *key_path = NULL;
-        if (strcmp(cf->key_mode, "symmetric") == 0)
-            key_path = cf->sym_key_path;
-        else
-            key_path = cf->public_key_path;
 
         ret = send_encrypted_file_via_https(
             ctx->curl,
             cf->url,
             file_path,
             cf->cert_path,
-            key_path,
-            cf->key_mode,
-            cf->on_all
+            cf->key_path,
+            cf->flags
         );
 
         if (ret == 0 && ctx->sent_db) db_insert(ctx->sent_db, file_path);
-        
+
         return ret;
     }
 
 #ifdef USE_WS
-    // WS path: enqueue file for persistent client
     if (!ctx->ws) {
         fprintf(
             stderr, 
@@ -313,8 +305,19 @@ int asym_file_callback(const char *file_path, void *ctx_void) {
     }
 
     if (!ctx->is_decrypt) { // encrypt
-        return encrypt_file_asymmetric(ctx->pub_key, file_path, dest, cf->on_all);
+        return encrypt_file_asymmetric(
+            ctx->pub_key, 
+            file_path, 
+            dest, 
+            (cf->flags & ENC_FLAG_ALL)
+        );
     } else { // decrypt
-        return decrypt_file_asymmetric(ctx->pub_key, ctx->pr_key, file_path, dest, cf->on_all);
+        return decrypt_file_asymmetric(
+            ctx->pub_key, 
+            ctx->pr_key, 
+            file_path, 
+            dest, 
+            (cf->flags & ENC_FLAG_ALL)
+        );
     }
 }

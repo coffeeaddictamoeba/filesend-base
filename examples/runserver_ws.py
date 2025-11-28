@@ -6,6 +6,7 @@ import subprocess
 from datetime import datetime
 import traceback
 import stat
+import shutil  # for copying non-encrypted files
 
 INCOMING_DIR  = "incoming_ws"
 DECRYPTED_DIR = "decrypted_ws"
@@ -23,6 +24,7 @@ async def handle_client(ws):
     current_file = None
     current_enc_path = None
     current_device_id = "unknown"
+    current_flags = 0  # bitfield coming from the client
 
     # Track per-connection results
     ok_files = []       # list of dicts: {"enc": ..., "dec": ...}
@@ -33,7 +35,7 @@ async def handle_client(ws):
         fail_count = len(failed_files)
         log(f"[WS] {tag}: {ok_count} files OK, {fail_count} files FAILED")
         if ok_files:
-            log("[WS] Successfully received & decrypted files:")
+            log("[WS] Successfully received & processed files:")
             for f in ok_files:
                 log(f"   OK  enc={f['enc']}  dec={f['dec']}")
         if failed_files:
@@ -58,6 +60,13 @@ async def handle_client(ws):
                         filename = data.get("filename")
                         current_device_id = data.get("device_id", "unknown")
 
+                        # flags field from client (bitfield)
+                        flags_val = data.get("flags", 0)
+                        try:
+                            current_flags = int(flags_val)
+                        except (TypeError, ValueError):
+                            current_flags = 0
+
                         if not filename:
                             await ws.send(json.dumps({
                                 "type": "error",
@@ -69,7 +78,7 @@ async def handle_client(ws):
                         enc_name = f"{current_device_id}_{timestamp}_{filename}"
                         current_enc_path = os.path.join(INCOMING_DIR, enc_name)
 
-                        log(f"[WS] Starting new file: {current_enc_path}")
+                        log(f"[WS] Starting new file: {current_enc_path} (flags={current_flags})")
                         current_file = open(current_enc_path, "wb")
 
                     elif msg_type == "file_end":
@@ -88,22 +97,43 @@ async def handle_client(ws):
                         current_file = None
                         log(f"[WS] Closed file {current_enc_path}")
 
+                        # make incoming file read-only
                         os.chmod(current_enc_path, stat.S_IREAD)  # 0o400
 
                         base_name = os.path.basename(current_enc_path)
                         dec_path = os.path.join(DECRYPTED_DIR, base_name)
 
+                        # decode flags:
+                        # bit 0 -> encryption enabled
+                        # bit 1 -> symmetric (else asymmetric)
+                        # bit 2 -> --all
+                        enc_enabled   = bool(current_flags & 0b001)
+                        enc_symmetric = bool(current_flags & 0b010)
+                        enc_all       = bool(current_flags & 0b100)
+
                         try:
-                            subprocess.check_call([
-                                "bin/./filesend",
-                                "decrypt",
-                                current_enc_path,
-                                "--asymmetric",
-                                "--all",
-                                "--dest",
-                                dec_path,
-                            ])
-                            log(f"[WS] Decrypted to: {dec_path}")
+                            if not enc_enabled:
+                                # no encryption on this file: just copy it as "decrypted"
+                                shutil.copy2(current_enc_path, dec_path)
+                                log(f"[WS] No encryption, copied to: {dec_path}")
+                            else:
+                                # build decrypt command depending on flags
+                                cmd = [
+                                    "bin/./filesend",
+                                    "decrypt",
+                                    current_enc_path,
+                                ]
+                                if enc_symmetric:
+                                    cmd.append("--symmetric")
+                                else:
+                                    cmd.append("--asymmetric")
+                                if enc_all:
+                                    cmd.append("--all")
+                                cmd.extend(["--dest", dec_path])
+
+                                subprocess.check_call(cmd)
+                                log(f"[WS] Decrypted to: {dec_path}")
+
                             ok_files.append({
                                 "enc": current_enc_path,
                                 "dec": dec_path,
@@ -119,6 +149,14 @@ async def handle_client(ws):
                             await ws.send(json.dumps({
                                 "type": "error",
                                 "msg": "decrypt failed"
+                            }))
+                        except Exception as e:
+                            log(f"[WS] Processing failed:", e)
+                            traceback.print_exc()
+                            failed_files.append(current_enc_path)
+                            await ws.send(json.dumps({
+                                "type": "error",
+                                "msg": "processing failed"
                             }))
 
                     elif msg_type == "end":

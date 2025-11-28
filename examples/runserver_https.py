@@ -2,6 +2,8 @@ from flask import Flask, request
 import os
 import subprocess
 from datetime import datetime
+import shutil
+import stat
 
 app = Flask(__name__)
 
@@ -13,8 +15,14 @@ os.makedirs(DECRYPTED_DIR, exist_ok=True)
 @app.post("/upload")
 def upload():
     # field name "file" must match curl_mime_name(part, "file")
-    f = request.files.get("file")
     device_id = request.form.get("device_id", "unknown")
+
+    # flags bitfield (optional)
+    flags_str = request.form.get("flags")
+    try:
+        flags = int(flags_str) if flags_str is not None else 0
+    except ValueError:
+        flags = 0
 
     # END SIGNAL: no file,"end=1"
     if "end" in request.form and "file" not in request.files:
@@ -35,26 +43,55 @@ def upload():
 
     f.save(enc_path)
     size = os.path.getsize(enc_path)
-    print(f"[SERVER] Received encrypted file: {enc_path} ({size} bytes)")
+    print(f"[SERVER] Received file: {enc_path} ({size} bytes), flags={flags}")
 
-    # Decrypt
+    # make incoming file read-only
+    try:
+        os.chmod(enc_path, stat.S_IREAD)
+    except Exception as e:
+        print(f"[SERVER] Warning: chmod failed for {enc_path}: {e}")
+
+    # Prepare decrypted/output path
     base_plain = f"{device_id}_{timestamp}_{f.filename}"
     dec_path   = os.path.join(DECRYPTED_DIR, base_plain)
 
-    # Run filesend binary. Args should match sending format or it will fail
+    # decode flags
+    enc_enabled   = bool(flags & 0b001)
+    enc_symmetric = bool(flags & 0b010)
+    enc_all       = bool(flags & 0b100)
+
+    # No encryption – just copy the received file to dec_path
+    if not enc_enabled:
+        try:
+            shutil.copy2(enc_path, dec_path)
+            print(f"[SERVER] No encryption, copied to: {dec_path}")
+            return "OK\n", 200
+        except Exception as e:
+            print(f"[SERVER] Copy failed: {e}")
+            return "copy failed\n", 500
+
+    # Encrypted – run filesend with proper options
     try:
-        subprocess.check_call([
+        cmd = [
             "bin/./filesend",
             "decrypt",
             enc_path,
-            "--asymmetric",
-            "--all",
-            "--dest",
-            dec_path,
-        ])
+        ]
+        if enc_symmetric:
+            cmd.append("--symmetric")
+        else:
+            cmd.append("--asymmetric")
+        if enc_all:
+            cmd.append("--all")
+        cmd.extend(["--dest", dec_path])
+
+        subprocess.check_call(cmd)
         print(f"[SERVER] Decrypted to: {dec_path}")
     except subprocess.CalledProcessError as e:
         print(f"[SERVER] Decrypt failed: {e}")
+        return "decrypt failed\n", 500
+    except Exception as e:
+        print(f"[SERVER] Unexpected error during decrypt: {e}")
         return "decrypt failed\n", 500
 
     return "OK\n", 200

@@ -57,8 +57,8 @@ int db_init(db_t* db, const char* db_path) {
 
     snprintf(
         db->db_path, 
-        sizeof(db->db_path)+16, 
-        "%s/.filesend_cache", basedir
+        sizeof(db->db_path)+sizeof(DB_NAME),
+        "%s/%s", basedir, DB_NAME
     );
 
     fprintf(
@@ -188,8 +188,4 @@ int db_insert(db_t* db, const char* path) {
     e->sent_ok = 1;
 
     return db_save(db);
-}
-
-int db_remove(db_t* db, const char* file_path) {
-    return 0; // will be added later
 }
