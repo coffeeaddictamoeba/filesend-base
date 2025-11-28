@@ -25,6 +25,8 @@ int send_file_via_https(CURL* curl, const char* url, const char* file_path, cons
     int attempts     = 0;
     int max_attempts = g_retry_enabled ? g_max_retries : 1;
 
+    make_readonly(file_path);
+
     while (attempts < max_attempts) {
         attempts++;
 
@@ -349,6 +351,11 @@ int ws_callback(struct lws *wsi, enum lws_callback_reasons reason, void* user, v
                 int idx = state.current_file;
                 if (idx >= 0 && idx < g_ws_client->file_count) {
                     g_ws_client->sent_ok[idx] = 1;
+
+                    if (g_ws_client->sent_db) {
+                        const char *path = g_ws_client->files[idx];
+                        db_insert(g_ws_client->sent_db, path);
+                    }
                 }
                 state.current_file++;
                 state.phase = 0;
@@ -486,6 +493,14 @@ int ws_client_init(ws_client_t *c, const char *ws_url, const char *device_id, co
 }
 
 int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
+    if (c->sent_db && db_find_sent(c->sent_db, file_path) == 1) {
+        fprintf(
+            stdout, 
+            "[WS] Skipping already sent file: %s\n", file_path
+        );
+        return 0;
+    }
+
     // Optional encryption before sending
     if (c->key_mode[0]) {
         if (strcmp(c->key_mode, "symmetric") == 0) {
@@ -516,6 +531,8 @@ int ws_client_enqueue_file(ws_client_t *c, const char *file_path) {
             }
         }
     }
+
+    make_readonly(file_path);
 
     // grow queue + status arrays
     if (c->file_count == c->file_cap) {

@@ -3,6 +3,8 @@
 
 #include <curl/curl.h>
 
+#include "db_utils.h"
+
 extern int g_retry_enabled;
 extern int g_max_retries;
 
@@ -49,6 +51,8 @@ typedef struct {
 } client_state_t;
 
 typedef struct {
+    db_t *sent_db;
+
     struct lws_context *ctx;
     struct lws *wsi;
 

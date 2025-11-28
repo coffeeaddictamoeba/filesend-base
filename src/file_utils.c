@@ -17,6 +17,14 @@
 #include "../include/key_utils.h"
 #include "../include/file_utils.h"
 
+int make_readonly(const char *path) {
+    if (chmod(path, 0400) != 0) {
+        perror("[WARN] chmod read-only failed");
+        return -1;
+    }
+    return 0;
+}
+
 int hash_file_contents(crypto_generichash_state* state, const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) {

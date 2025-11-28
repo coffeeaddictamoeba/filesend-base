@@ -226,10 +226,19 @@ int send_file_callback(const char *file_path, void *ctx_void) {
     send_ctx_t *ctx = (send_ctx_t*)ctx_void;
     filesend_config_t *cf = ctx->cf;
 
+    if (ctx->sent_db && db_find_sent(ctx->sent_db, file_path)) {
+        fprintf(
+            stdout, 
+            "[INFO] Skipping already sent file: %s\n", file_path
+        );
+        return 0;
+    }
+
     // HTTPS path: send immediately
     if (!cf->use_ws) {
+        int ret = 0;
         if (!cf->key_mode) {
-            return send_file_via_https(ctx->curl, cf->url, file_path, cf->cert_path);
+            ret = send_file_via_https(ctx->curl, cf->url, file_path, cf->cert_path);
         }
 
         const char *key_path = NULL;
@@ -238,7 +247,7 @@ int send_file_callback(const char *file_path, void *ctx_void) {
         else
             key_path = cf->public_key_path;
 
-        return send_encrypted_file_via_https(
+        ret = send_encrypted_file_via_https(
             ctx->curl,
             cf->url,
             file_path,
@@ -247,6 +256,10 @@ int send_file_callback(const char *file_path, void *ctx_void) {
             cf->key_mode,
             cf->on_all
         );
+
+        if (ret == 0 && ctx->sent_db) db_insert(ctx->sent_db, file_path);
+        
+        return ret;
     }
 
 #ifdef USE_WS

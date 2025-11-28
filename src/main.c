@@ -235,6 +235,15 @@ int main(int argc, char** argv) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
         curl_easy_setopt(curl, CURLOPT_CAINFO, cf.cert_path);
 
+        db_t sent_db;
+        if (db_init(&sent_db, cf.init_path) != 0) {
+            fprintf(
+                stderr, 
+                RED "[DB] init failed, continuing without skip\n" RESET
+            );
+            memset(&sent_db, 0, sizeof(sent_db));
+        }
+
 #ifdef USE_WS
         ws_client_t ws_client;
         memset(&ws_client, 0, sizeof(ws_client));
@@ -261,11 +270,14 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
         }
+
+        ws_client.sent_db = &sent_db;
 #endif
 
         send_ctx_t sctx = {0};
         sctx.cf   = &cf;
         sctx.curl = curl;
+        sctx.sent_db = &sent_db;
 
 #ifdef USE_WS
         sctx.ws   = cf.use_ws ? &ws_client : NULL;
@@ -314,6 +326,7 @@ int main(int argc, char** argv) {
         if (cf.use_ws) ws_client_destroy(&ws_client);
 #endif
         curl_easy_cleanup(curl);
+        db_free(&sent_db);
         return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 

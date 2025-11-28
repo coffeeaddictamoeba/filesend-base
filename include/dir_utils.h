@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "file_utils.h"
+#include "db_utils.h"
 
 #ifdef USE_WS
 #include "send_utils.h"
@@ -19,6 +20,7 @@ typedef struct processed_node {
 typedef struct {
     CURL *curl;
     filesend_config_t *cf;
+    db_t *sent_db;
 
 #ifdef USE_WS
     ws_client_t *ws;

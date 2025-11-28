@@ -39,6 +39,8 @@ typedef struct {
     uint32_t pmode;
 } file_metadata_t;
 
+int make_readonly(const char *path);
+
 // Integrity check
 int sign_file(
     const unsigned char* key, 

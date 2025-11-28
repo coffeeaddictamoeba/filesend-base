@@ -5,6 +5,7 @@ import os
 import subprocess
 from datetime import datetime
 import traceback
+import stat
 
 INCOMING_DIR  = "incoming_ws"
 DECRYPTED_DIR = "decrypted_ws"
@@ -86,6 +87,8 @@ async def handle_client(ws):
                         current_file.close()
                         current_file = None
                         log(f"[WS] Closed file {current_enc_path}")
+
+                        os.chmod(current_enc_path, stat.S_IREAD)  # 0o400
 
                         base_name = os.path.basename(current_enc_path)
                         dec_path = os.path.join(DECRYPTED_DIR, base_name)
