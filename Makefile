@@ -1,13 +1,18 @@
-CC=gcc
-CFLAGS=-Wall -Wextra -O2 -Iinclude -DUSE_WS
-LDFLAGS=-lsodium -lcurl -lwebsockets # -lssl -lcrypto
-BUILD_DIR = bin
-OBJ_DIR = obj
-SRC_DIR = src
+CXX       := g++
+CXXFLAGS  := -std=c++17 -Wall -Wextra -O2 -Iinclude
+CFLAGS    := -Wall -Wextra -O2 -Iinclude
+LDFLAGS   := -lsodium -lcurl -lssl -lcrypto -lpthread
 
-SOURCES = $(wildcard $(SRC_DIR)/*.c)
-OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
-EXECUTABLE = $(BUILD_DIR)/filesend
+SRC_DIR   := src
+OBJ_DIR   := obj
+BUILD_DIR := bin
+
+
+CPP_SOURCES := $(wildcard $(SRC_DIR)/*.cpp)
+CPP_OBJECTS := $(CPP_SOURCES:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
+OBJECTS     := $(CPP_OBJECTS)
+
+EXECUTABLE  := $(BUILD_DIR)/filesend
 
 all: $(EXECUTABLE)
 
@@ -18,12 +23,12 @@ $(OBJ_DIR):
 	mkdir -p $@
 
 $(EXECUTABLE): $(OBJECTS) | $(BUILD_DIR)
-	$(CC)  $^ -o $@ $(LDFLAGS)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -r $(BUILD_DIR) $(OBJ_DIR)
+	rm -rf $(OBJ_DIR) $(BUILD_DIR)
 
 .PHONY: all clean

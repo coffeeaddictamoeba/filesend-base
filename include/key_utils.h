@@ -3,13 +3,7 @@
 
 #include <stddef.h>
 
-#include "ui_utils.h"
-
-// Default paths for creation of keys. Do not set to actual key locations.
-#define DEFAULT_SYM_KEY_PATH "sym_key.bin"
-#define DEFAULT_PR_KEY_PATH  "pr_key.bin"
-#define DEFAULT_PUB_KEY_PATH "pub_key.bin"
-#define DEFAULT_CA_CERT_PATH "ca_cert.pem"
+#include "defaults.h"
 
 int load_key(
     const char* key_path, 

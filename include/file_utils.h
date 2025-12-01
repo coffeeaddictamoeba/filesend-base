@@ -4,9 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <sodium/crypto_hash_sha256.h>
 #include <sodium/crypto_secretstream_xchacha20poly1305.h>
 
-#include "ui_utils.h"
+#include "defaults.h"
 #include "key_utils.h"
 
 #define CHUNK_SIZE  4096
@@ -32,7 +33,7 @@ typedef struct {
 
     int  retry_enabled;   // 0 = no retry, 1 = allow retry
     int  max_retries;     // how many attempts per file (total)
-    int   timeout_secs;  // 0 = no monitoring, >0 = watch dir
+    int  timeout_secs;  // 0 = no monitoring, >0 = watch dir
 
     uint32_t flags;      // |Res|Res|All|Sym|Enc|
 } filesend_config_t;
@@ -46,35 +47,22 @@ typedef struct {
 int make_readonly(const char *path);
 
 // Integrity check
-int sign_file(
-    const unsigned char* key, 
-    const char* file, 
-    const char* mac_file, 
-    unsigned char* mac, 
-    size_t mac_len
-);
-
-int verify_file(
-    const unsigned char* key, 
-    const char* file, 
-    const char* mac_file, 
-    unsigned char* mac, 
-    size_t mac_len
-);
+int compute_file_sha256(const char *path, unsigned char out[crypto_hash_sha256_BYTES]);
+int compute_file_sha256_hex(const char *path, char *hex_out, size_t hex_out_len);
 
 // Encryption/decryption
 int encrypt_file_symmetric(
     const unsigned char* key, 
     const char* plain_path, 
-    const char* enc_path
-    /*int enc_all*/
+    const char* enc_path,
+    int enc_all
 );
 
 int decrypt_file_symmetric(
     const unsigned char* key, 
     const char* enc_path, 
-    const char* dec_path
-    /*int dec_all*/
+    const char* dec_path,
+    int dec_all
 );
 
 int encrypt_file_asymmetric(
