@@ -15,8 +15,8 @@
 #define DEFAULT_PUB_KEY_PATH "pub_key.bin"
 #define DEFAULT_CA_CERT_PATH "ca_cert.pem"
 
-#define MAX_RECONNECTS 5
-#define WAIT_BEFORE_RECONNECT 3
+#define MAX_RECONNECTS 3
+#define WAIT_BEFORE_RECONNECT 3000
 
 #define MAX_SENT_FILES 1024
 

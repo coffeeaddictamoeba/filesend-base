@@ -1,4 +1,3 @@
-// transport.hpp
 #pragma once
 
 #include <string>
@@ -15,13 +14,14 @@ extern "C" {
 #include <sodium/crypto_secretstream_xchacha20poly1305.h>
 }
 
-#include "../include/file_utils.h"
-#include "../include/key_utils.h"
+#include "defaults.h"
+#include "file_utils.h"
+#include "key_utils.h"
 
 // Retry configuration
 struct retry_policy_t {
-    int max_attempts{1};
-    std::chrono::milliseconds delay{1000};
+    int max_attempts{MAX_RECONNECTS};
+    std::chrono::milliseconds delay{WAIT_BEFORE_RECONNECT};
 
     bool enabled() const { return max_attempts > 1; }
 };

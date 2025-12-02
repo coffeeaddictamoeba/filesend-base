@@ -3,7 +3,7 @@
 #include <string>
 #include <memory>
 
-#include "../include/sender.hpp"
+#include "sender.hpp"
 
 class HttpsSender : public Sender {
 public:

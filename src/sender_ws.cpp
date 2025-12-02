@@ -31,7 +31,7 @@ bool WsSender::is_connected() {
 bool WsSender::_send_file(const std::string& file_path, uint32_t flags) {
     if (!is_connected()) return false;
 
-    int rc = client_.send_file(file_path, /*max_attempts inside WsClient or 1*/ 1, flags);
+    int rc = client_.send_file(file_path, retry_send_.max_attempts, flags);
     if (rc != 0) {
         connected_ = false; // will reconnect next time
         return false;

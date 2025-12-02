@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <string>
 
+#include "../include/defaults.h"
 #include "../include/ws_client.hpp"
 
 WsClient::WsClient(const std::string& url, const std::string& device_id, const std::string& ca_cert)
@@ -36,7 +37,7 @@ void WsClient::parse_url() {
         use_tls_ = false;
         rest = url_.substr(std::strlen(WS));
     } else {
-        throw std::runtime_error("URL must start with ws:// or wss://");
+        throw std::runtime_error(RED "URL must start with ws:// or wss://" RESET);
     }
 
     auto slash = rest.find('/');
@@ -66,13 +67,13 @@ int WsClient::connect_plain() {
         connected_ = true;
         fprintf(
             stdout, 
-            "[WS] Connected (plain) to %s:%s%s\n", host_.c_str(), port_str_.c_str(), target_.c_str()
+            GREEN "[WS] Connected (plain) to %s:%s%s\n" RESET, host_.c_str(), port_str_.c_str(), target_.c_str()
         );
         return 0;
     } catch (const std::exception& e) {
         fprintf(
             stderr, 
-            "[WS] connect_plain exception: %s\n", e.what()
+            RED "[WS] connect_plain exception: %s\n" RESET, e.what()
         );
         connected_ = false;
         return -1;
@@ -94,13 +95,13 @@ int WsClient::connect_tls() {
         connected_ = true;
         fprintf(
             stdout, 
-            "[WS] Connected (TLS) to %s:%s%s\n", host_.c_str(), port_str_.c_str(), target_.c_str()
+            GREEN "[WS] Connected (TLS) to %s:%s%s\n" RESET, host_.c_str(), port_str_.c_str(), target_.c_str()
         );
         return 0;
     } catch (const std::exception& e) {
         fprintf(
             stderr, 
-            "[WS] connect_tls exception: %s\n", e.what()
+            RED "[WS] connect_tls exception: %s\n" RESET, e.what()
         );
         connected_ = false;
         return -1;
@@ -124,7 +125,7 @@ void WsClient::close() {
         if (ec) {
             fprintf(
                 stderr, 
-                "[WS] close error: %s\n", ec.message().c_str()
+                RED "[WS] close error: %s\n" RESET, ec.message().c_str()
             );
         }
     } catch (...) {}
@@ -145,7 +146,7 @@ int WsClient::send_file(const std::string& file_path, int max_attempts, uint32_t
         filename + "\",\"device_id\":\"" + device_id_ + "\",\"flags\":\"" + std::to_string(flags) + "\"}";
 
     try {
-        auto sendText = [&](const std::string& s) {
+        auto send_text = [&](const std::string& s) {
             if (use_tls_) {
                 ws_tls_->text(true);
                 ws_tls_->write(net::buffer(s));
@@ -155,7 +156,7 @@ int WsClient::send_file(const std::string& file_path, int max_attempts, uint32_t
             }
         };
 
-        auto sendBin = [&](const void* data, std::size_t sz) {
+        auto send_bin = [&](const void* data, std::size_t sz) {
             if (use_tls_) {
                 ws_tls_->binary(true);
                 ws_tls_->write(net::buffer(data, sz));
@@ -165,11 +166,11 @@ int WsClient::send_file(const std::string& file_path, int max_attempts, uint32_t
             }
         };
 
-        sendText(header_json);
+        send_text(header_json);
 
         std::ifstream f(file_path, std::ios::binary);
         if (!f) {
-            std::perror("[WS] fopen file");
+            std::perror(RED "[WS] fopen file" RESET);
             return -1;
         }
 
@@ -178,14 +179,14 @@ int WsClient::send_file(const std::string& file_path, int max_attempts, uint32_t
             f.read(buf, sizeof(buf));
             std::streamsize n = f.gcount();
             if (n > 0) {
-                sendBin(buf, static_cast<std::size_t>(n));
+                send_bin(buf, static_cast<std::size_t>(n));
             }
         }
 
         f.close();
 
         std::string end_json = "{\"type\":\"file_end\"}";
-        sendText(end_json);
+        send_text(end_json);
 
         beast::flat_buffer buffer;
         if (use_tls_) {
@@ -202,7 +203,7 @@ int WsClient::send_file(const std::string& file_path, int max_attempts, uint32_t
     } catch (const std::exception& e) {
         fprintf(
             stderr, 
-            "[WS] send_file exception: %s\n", e.what()
+            RED "[WS] send_file exception: %s\n" RESET, e.what()
         );
         connected_ = false;
         return -1;
@@ -230,7 +231,7 @@ int WsClient::send_end() {
     } catch (const std::exception& e) {
         fprintf(
             stderr, 
-            "[WS] send_end exception: %s\n", e.what()
+            RED "[WS] send_end exception: %s\n" RESET, e.what()
         );
         connected_ = false;
         return -1;

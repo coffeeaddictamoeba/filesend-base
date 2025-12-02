@@ -331,18 +331,14 @@ int main(int argc, char** argv) {
         }
 
         // Retry policy
-        int maxRetries = cf.retry_enabled ? cf.max_retries : 1;
-        if (maxRetries <= 0) maxRetries = 1;
+        int max_retries = cf.retry_enabled ? cf.max_retries : 1;
+        if (max_retries <= 0) max_retries = 1;
 
-        retry_policy_t send_retry{
-            maxRetries,
-            std::chrono::milliseconds(1000)
-        };
+        retry_policy_t send_retry;
+        send_retry.max_attempts = max_retries;
 
-        retry_policy_t conn_retry{
-            maxRetries,
-            std::chrono::milliseconds(2000)
-        };
+        retry_policy_t conn_retry;
+        conn_retry.max_attempts = max_retries;
 
         file_db db(cf.init_path); db.load();
 
