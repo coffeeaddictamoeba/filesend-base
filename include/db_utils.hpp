@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <ctime>
+#include <unordered_map>
 
 #include "defaults.h"
 
@@ -30,6 +31,7 @@ public:
 private:
     std::string db_path_;
     std::array<db_entry_t, MAX_SENT_FILES> entries_;
+    std::unordered_map<std::string, std::size_t> idx_by_path_;
 
     int find_file(const std::string& file_path) const;
 

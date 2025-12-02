@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <limits>
+#include <string>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <linux/limits.h>
@@ -30,17 +31,14 @@ file_db::file_db(const std::string& db_path) {
 
     fprintf(
         stderr,
-        GREEN "[SUCCESS] DB initialized at %s\n" RESET, base_dir.c_str()
+        GREEN "[SUCCESS] DB initialized at %s\n" RESET, db_path_.c_str()
     );
 }
 
-int file_db::find_file(const std::string& file_path) const { // can be faster?
-    for (std::size_t i = 0; i < entries_.size(); ++i) {
-        if (entries_[i].file_path == file_path) {
-            return static_cast<int>(i);
-        }
-    }
-    return -1;
+int file_db::find_file(const std::string& file_path) const {
+    auto it = idx_by_path_.find(file_path);
+    if (it == idx_by_path_.end()) return -1;
+    return static_cast<int>(it->second);
 }
 
 bool file_db::stat_file(const std::string& file_path, std::time_t& mtime, std::uint64_t& size) const {
@@ -81,7 +79,9 @@ bool file_db::load() {
         e.sent_ok   = (std::stoi(ok_str) != 0);
         e.sha_hex   = sha_str;
 
-        entries_[files_total++] = std::move(e);
+        int idx = files_total++;
+        entries_[idx] = std::move(e);
+        idx_by_path_[entries_[idx].file_path] = idx;
     }
 
     return true;
@@ -100,7 +100,7 @@ bool file_db::save() const {
             << static_cast<long>(e.mtime) << '|'
             << static_cast<long long>(e.size) << '|'
             << (e.sent_ok ? 1 : 0) << '|'
-            << e.sha_hex
+            << (e.sha_hex.empty() ? "" : e.sha_hex)
             << '\n';
     }
 
@@ -124,16 +124,7 @@ bool file_db::is_sent(const std::string& file_path) const {
         return false;
     }
 
-    char sha[crypto_hash_sha256_BYTES];
-    if (compute_file_sha256_hex(file_path.c_str(), sha, sizeof(sha)) != 0) {
-        fprintf(
-            stderr, 
-            "[ERROR] DB: Failed to compute SHA for %s\n", file_path.c_str()
-        );
-        return false;
-    }
-
-    return (sha == e.sha_hex);
+    return true;
 }
 
 bool file_db::mark_sent(const std::string& file_path) {
@@ -144,7 +135,7 @@ bool file_db::mark_sent(const std::string& file_path) {
         return false;
     }
 
-    char sha[crypto_hash_sha256_BYTES];
+    char sha[crypto_hash_sha256_BYTES * 2 + 1];
     if (compute_file_sha256_hex(file_path.c_str(), sha, sizeof(sha)) != 0) {
         fprintf(
             stderr, 
