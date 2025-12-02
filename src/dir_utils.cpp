@@ -64,7 +64,7 @@ bool FileSender::process_one_file(const fs::path& p, const std::string& device_i
     processed.insert(name);
 
     if (db_) {
-        if (!db_->mark_sent(p.string())) {
+        if (!db_->insert(p.string())) {
             fprintf(
                 stderr,
                 "[FileSender] Warning: failed to DB-mark %s as sent\n", p.c_str()

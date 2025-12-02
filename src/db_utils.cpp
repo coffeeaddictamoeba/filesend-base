@@ -15,8 +15,6 @@
 
 namespace fs = std::filesystem;
 
-int files_total = 0;
-
 std::string dirname_of(const std::string& path) {
     fs::path p(path);
     if (fs::is_directory(p)) return fs::canonical(p).string();
@@ -57,6 +55,11 @@ bool file_db::load() {
         return true;
     }
 
+    entries_.clear();
+    entries_.reserve(DB_INIT_SIZE);
+
+    idx_by_path_.clear();
+
     std::string line;
     while (std::getline(in, line)) {
         if (line.empty()) continue;
@@ -79,9 +82,9 @@ bool file_db::load() {
         e.sent_ok   = (std::stoi(ok_str) != 0);
         e.sha_hex   = sha_str;
 
-        int idx = files_total++;
-        entries_[idx] = std::move(e);
-        idx_by_path_[entries_[idx].file_path] = idx;
+        std::size_t idx = entries_.size();
+        entries_.push_back(std::move(e));
+        idx_by_path_[entries_.back().file_path] = idx;
     }
 
     return true;
@@ -127,11 +130,11 @@ bool file_db::is_sent(const std::string& file_path) const {
     return true;
 }
 
-bool file_db::mark_sent(const std::string& file_path) {
+bool file_db::insert(const std::string& file_path) {
     std::time_t mtime{};
     std::uint64_t size{};
     if (!stat_file(file_path, mtime, size)) {
-        std::perror("[ERROR] stat in mark_sent");
+        std::perror("[ERROR] stat in insert");
         return false;
     }
 
@@ -152,7 +155,7 @@ bool file_db::mark_sent(const std::string& file_path) {
         e.size       = size;
         e.sent_ok    = true;
         e.sha_hex    = std::move(sha);
-        entries_[files_total++] = std::move(e);
+        entries_.push_back(std::move(e));
     } else {
         auto& e = entries_[idx];
         e.mtime   = mtime;
@@ -160,6 +163,39 @@ bool file_db::mark_sent(const std::string& file_path) {
         e.sent_ok = true;
         e.sha_hex = std::move(sha);
     }
+
+    return save();
+}
+
+bool file_db::clean() {
+    entries_.clear();
+    idx_by_path_.clear();
+
+    std::ofstream out(db_path_, std::ios::trunc);
+    if (!out.is_open()) {
+        std::perror("[DB] clean: failed to truncate DB file");
+        return false;
+    }
+
+    return true;
+}
+
+bool file_db::remove(const std::string& file_path) {
+    auto it = idx_by_path_.find(file_path);
+    if (it == idx_by_path_.end()) {
+        return false;
+    }
+
+    std::size_t idx = it->second;
+    std::size_t last_idx = entries_.size() - 1;
+
+    if (idx != last_idx) {
+        entries_[idx] = std::move(entries_[last_idx]);
+        idx_by_path_[entries_[idx].file_path] = idx;
+    }
+
+    entries_.pop_back();
+    idx_by_path_.erase(it);
 
     return save();
 }
