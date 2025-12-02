@@ -26,7 +26,7 @@ bool FileSender::send_one_file(const std::string& file_path, const std::string& 
 bool FileSender::process_one_file(const fs::path& p, const std::string& device_id, std::unordered_set<std::string>& processed) {
     const std::string name = p.filename().string();
 
-    if (db_ && db_->is_sent(p.string())) {
+    if (db_ && (fs::equivalent(p, db_->db_path()) || db_->is_sent(p.string()))) {
         fprintf(
             stdout,
             "[INFO] Skipping already sent file (DB): %s\n", p.c_str()
@@ -67,7 +67,7 @@ bool FileSender::process_one_file(const fs::path& p, const std::string& device_i
         if (!db_->insert(p.string())) {
             fprintf(
                 stderr,
-                "[FileSender] Warning: failed to DB-mark %s as sent\n", p.c_str()
+                "[ERROR] Warning: failed to insert %s to DB\n", p.c_str()
             );
         }
     }
@@ -145,7 +145,14 @@ bool FileSender::send_files_from_path(const std::string& path, const std::string
                     stdout,
                     "[INFO] No new files for %lld seconds, stopping.\n", (long long)timeout.count()
                 );
-                break;
+
+                // If DB is NOT needed on server, comment
+                if (db_ && !db_->db_path().empty()) {
+                    sender_.send_file(db_->db_path(), device_id, enc_.flags);
+                }
+
+                sender_.send_end(device_id);
+                return true;
             }
         }
 
