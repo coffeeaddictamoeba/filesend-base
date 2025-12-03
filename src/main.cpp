@@ -16,10 +16,10 @@
 #include "../include/file_utils.h"
 #include "../include/db_utils.hpp"
 
-const char* PUB_KEY_ENV   = "PUB_KEY_PATH";
-const char* PR_KEY_ENV    = "PR_KEY_PATH";
-const char* SYM_KEY_ENV   = "SYM_KEY_PATH";
-const char* CERT_PATH_ENV = "CERT_PATH";
+constexpr const char* PUB_KEY_ENV   = "PUB_KEY_PATH";
+constexpr const char* PR_KEY_ENV    = "PR_KEY_PATH";
+constexpr const char* SYM_KEY_ENV   = "SYM_KEY_PATH";
+constexpr const char* CERT_PATH_ENV = "CERT_PATH";
 
 int process_path_encrypt_decrypt(const filesend_config_t& cf, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
     struct stat st{};
@@ -120,13 +120,13 @@ int process_path_encrypt_decrypt(const filesend_config_t& cf, const std::functio
     return ret;
 }
 
-static void usage(const char* prog) {
-    std::fprintf(
+void usage(const char* prog) {
+    fprintf(
         stderr,
         "Usage:\n"
         "  %s send  [--https|--ws]  <path> <url> "
         "[--encrypt symmetric|asymmetric] [--all] "
-        "[--timeout <n>] [--retry <n>] [--no-retry]\n"
+        "[--timeout <n>] [--retry <n>] [--no-retry] [--batch <n>]\n"
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
         "[--dest <file>] [--timeout <n>]\n"
         "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
@@ -147,6 +147,7 @@ int parse_args(int argc, char** argv, filesend_config_t* cf) {
     cf->timeout_secs  = 0;   // default: no monitoring
     cf->max_retries   = 3;
     cf->retry_enabled = 1;
+    cf->batch_size    = 1;
 
     // envs
     cf->dec_key_path = std::getenv(PR_KEY_ENV);
@@ -196,6 +197,17 @@ int parse_args(int argc, char** argv, filesend_config_t* cf) {
 
             } else if (std::strcmp(arg, "--all") == 0) {
                 cf->flags |= ENC_FLAG_ALL;
+
+            } else if (std::strcmp(arg, "--batch") == 0) {
+                if (i + 1 >= argc) {
+                    std::fprintf(
+                        stderr,
+                        RED "[ERROR] --batch requires integer size\n" RESET
+                    );
+                    return -1;
+                }
+                cf->batch_size = std::atoi(argv[++i]);
+                if (cf->batch_size < 0) cf->batch_size = 0;
 
             } else if (std::strcmp(arg, "--timeout") == 0) {
                 if (i + 1 >= argc) {
@@ -334,11 +346,14 @@ int main(int argc, char** argv) {
         int max_retries = cf.retry_enabled ? cf.max_retries : 1;
         if (max_retries <= 0) max_retries = 1;
 
-        retry_policy_t send_retry;
-        send_retry.max_attempts = max_retries;
-
-        retry_policy_t conn_retry;
-        conn_retry.max_attempts = max_retries;
+        send_policy_t policy;
+        policy.retry_send.max_attempts = policy.retry_connect.max_attempts = max_retries; // make more flexible
+        policy.cert_path = cf.cert_path;
+        policy.timeout = std::chrono::seconds(cf.timeout_secs);
+        policy.enc_p = {
+            static_cast<std::uint32_t>(cf.flags),
+            cf.key_path ? cf.key_path : ""
+        };
 
         file_db db(cf.init_path); db.load();
 
@@ -350,33 +365,22 @@ int main(int argc, char** argv) {
             sender = std::make_unique<WsSender>(
                 cf.url,
                 device_id,
-                send_retry,
-                conn_retry,
-                cf.cert_path
+                policy
             );
         } else {
             // HTTPS transport
             sender = std::make_unique<HttpsSender>(
                 cf.url,
-                cf.cert_path,
-                send_retry
+                device_id,
+                policy
             );
-        }
+        }        
 
-        enc_policy_t enc{
-            static_cast<std::uint32_t>(cf.flags),
-            cf.key_path ? cf.key_path : ""
-        };
+        FileSender s(*sender, &db);
+        
+        bool ok = s.send_files_from_path(cf.init_path, policy.timeout);
 
-        FileSender s(*sender, enc, send_retry, &db);
-
-        bool ok = s.send_files_from_path(
-            cf.init_path,
-            device_id,
-            std::chrono::seconds(cf.timeout_secs)
-        );
-
-        sender->send_end(device_id);
+        sender->send_end();
 
         curl_global_cleanup();
         return ok ? EXIT_SUCCESS : EXIT_FAILURE;

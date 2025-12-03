@@ -26,7 +26,7 @@ public:
     bool is_sent(const std::string& file_path) const;
     bool insert(const std::string& file_path);
 
-    bool clean();
+    bool clear();
     bool remove(const std::string& file_path);
 
     const std::string& db_path() const { return db_path_; }

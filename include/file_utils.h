@@ -33,7 +33,9 @@ typedef struct {
 
     int  retry_enabled;   // 0 = no retry, 1 = allow retry
     int  max_retries;     // how many attempts per file (total)
-    int  timeout_secs;  // 0 = no monitoring, >0 = watch dir
+    int  timeout_secs;    // 0 = no monitoring, >0 = watch dir
+
+    int  batch_size;
 
     uint32_t flags;      // |Res|Res|All|Sym|Enc|
 } filesend_config_t;

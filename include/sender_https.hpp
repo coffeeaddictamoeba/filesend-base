@@ -8,33 +8,23 @@
 class HttpsSender : public Sender {
 public:
     HttpsSender(
-        const std::string& url, 
-        const std::string& cert_path, 
-        retry_policy_t retry
+        const std::string& url,
+        const std::string& device_id,
+        send_policy_t policy
     );
 
     ~HttpsSender() override;
 
-    bool send_file(
-        const std::string& file_path, 
-        const std::string& device_id,
-        uint32_t flags
-    ) override;
-
-    bool send_end(const std::string& device_id) override;
+    bool send_file(const std::string& file_path) override;
+    bool send_end() override;
 
 private:
     std::string url_;
-    std::string cert_path_;
-    retry_policy_t retry_;
+    std::string device_id_;
+    send_policy_t policy_;
 
     CURL* curl_{nullptr};
 
-    bool _send_file(
-        const std::string& file_path,
-        const std::string& device_id,
-        uint32_t flags
-    );
-
-    bool _send_end(const std::string& device_id);
+    bool _send_file(const std::string& file_path);
+    bool _send_end();
 };

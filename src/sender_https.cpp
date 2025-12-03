@@ -3,7 +3,7 @@
 
 #include "../include/sender_https.hpp"
 
-HttpsSender::HttpsSender(const std::string& url, const std::string& cert_path, retry_policy_t retry) : url_(url), cert_path_(cert_path), retry_(retry) {
+HttpsSender::HttpsSender(const std::string& url, const std::string& device_id, send_policy_t policy) : url_(url), device_id_(device_id), policy_(policy) {
     curl_ = curl_easy_init();
     if (!curl_) {
         throw std::runtime_error("curl_easy_init failed");
@@ -11,8 +11,8 @@ HttpsSender::HttpsSender(const std::string& url, const std::string& cert_path, r
 
     curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 2L);
-    if (!cert_path_.empty()) {
-        curl_easy_setopt(curl_, CURLOPT_CAINFO, cert_path_.c_str());
+    if (!policy.cert_path.empty()) {
+        curl_easy_setopt(curl_, CURLOPT_CAINFO, policy.cert_path.c_str());
     }
 }
 
@@ -23,7 +23,7 @@ HttpsSender::~HttpsSender() {
     }
 }
 
-bool HttpsSender::_send_file(const std::string& file_path, const std::string& device_id, uint32_t flags) {
+bool HttpsSender::_send_file(const std::string& file_path) {
     make_readonly(file_path.c_str());
 
     curl_mime* mime = curl_mime_init(curl_);
@@ -37,11 +37,11 @@ bool HttpsSender::_send_file(const std::string& file_path, const std::string& de
     // device_id
     curl_mimepart* dev = curl_mime_addpart(mime);
     curl_mime_name(dev, "device_id");
-    curl_mime_data(dev, device_id.c_str(), CURL_ZERO_TERMINATED);
+    curl_mime_data(dev, device_id_.c_str(), CURL_ZERO_TERMINATED);
 
     // flags
     char buf[32];
-    snprintf(buf, sizeof(buf), "%u", flags);
+    snprintf(buf, sizeof(buf), "%u", policy_.enc_p.flags);
     curl_mimepart* fl = curl_mime_addpart(mime);
     curl_mime_name(fl, "flags");
     curl_mime_data(fl, buf, CURL_ZERO_TERMINATED);
@@ -78,15 +78,15 @@ bool HttpsSender::_send_file(const std::string& file_path, const std::string& de
     return ok;
 }
 
-bool HttpsSender::send_file(const std::string& file_path, const std::string& device_id, uint32_t flags) {
+bool HttpsSender::send_file(const std::string& file_path) {
     return run_with_retries(
-        retry_,
+        policy_.retry_send,
         "HTTPS send_file(" + file_path + ")",
-        [&]() { return _send_file(file_path, device_id, flags); }
+        [&]() { return _send_file(file_path); }
     );
 }
 
-bool HttpsSender::_send_end(const std::string& device_id) {
+bool HttpsSender::_send_end() {
     curl_mime* mime = curl_mime_init(curl_);
     if (!mime) return false;
 
@@ -98,7 +98,7 @@ bool HttpsSender::_send_end(const std::string& device_id) {
     // device_id
     curl_mimepart* dev = curl_mime_addpart(mime);
     curl_mime_name(dev, "device_id");
-    curl_mime_data(dev, device_id.c_str(), CURL_ZERO_TERMINATED);
+    curl_mime_data(dev, device_id_.c_str(), CURL_ZERO_TERMINATED);
 
     curl_easy_setopt(curl_, CURLOPT_URL, url_.c_str());
     curl_easy_setopt(curl_, CURLOPT_MIMEPOST, mime);
@@ -109,7 +109,7 @@ bool HttpsSender::_send_end(const std::string& device_id) {
     if (res != CURLE_OK) {
         fprintf(
             stderr,
-            RED "[ERROR] HTTPS: sendEnd failed: %s\n" RESET, curl_easy_strerror(res)
+            RED "[ERROR] HTTPS: send_end failed: %s\n" RESET, curl_easy_strerror(res)
         );
     } else {
         fprintf(
@@ -123,10 +123,10 @@ bool HttpsSender::_send_end(const std::string& device_id) {
     return ok;
 }
 
-bool HttpsSender::send_end(const std::string& device_id) {
+bool HttpsSender::send_end() {
     return run_with_retries(
-        retry_,
+        policy_.retry_send,
         "HTTPS send_end",
-        [&]() { return _send_end(device_id); }
+        [&]() { return _send_end(); }
     );
 }

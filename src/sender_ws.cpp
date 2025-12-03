@@ -2,19 +2,18 @@
 
 #include "../include/sender_ws.hpp"
 
-WsSender::WsSender(const std::string& url, const std::string& device_id, retry_policy_t retry_send, retry_policy_t retry_connect, const std::string& cert_path)
+WsSender::WsSender(const std::string& url, const std::string& device_id, send_policy_t& policy)
     : url_(url),
       device_id_(device_id),
-      retry_send_(retry_send),
-      retry_connect_(retry_connect),
-      client_(url, device_id, cert_path) {
+      policy_(policy),
+      client_(url, device_id, policy_.cert_path) {
 }
 
 bool WsSender::is_connected() {
     if (connected_) return true;
 
     bool ok = run_with_retries(
-        retry_connect_,
+        policy_.retry_connect,
         "WS connect",
         [&]() {
             int rc = client_.connect();
@@ -28,10 +27,10 @@ bool WsSender::is_connected() {
     return ok;
 }
 
-bool WsSender::_send_file(const std::string& file_path, uint32_t flags) {
+bool WsSender::_send_file(const std::string& file_path) {
     if (!is_connected()) return false;
 
-    int rc = client_.send_file(file_path, retry_send_.max_attempts, flags);
+    int rc = client_.send_file(file_path, policy_.retry_send.max_attempts, policy_.enc_p.flags);
     if (rc != 0) {
         connected_ = false; // will reconnect next time
         return false;
@@ -39,13 +38,11 @@ bool WsSender::_send_file(const std::string& file_path, uint32_t flags) {
     return true;
 }
 
-bool WsSender::send_file(const std::string& file_path, const std::string& device_id, uint32_t flags) {
-    (void)device_id; // device id is already embedded in WsClient handshake/header
-
+bool WsSender::send_file(const std::string& file_path) {
     return run_with_retries(
-        retry_send_,
+        policy_.retry_send,
         "WS send_file(" + file_path + ")",
-        [&]() { return _send_file(file_path, flags); }
+        [&]() { return _send_file(file_path); }
     );
 }
 
@@ -60,11 +57,9 @@ bool WsSender::_send_end() {
     return true;
 }
 
-bool WsSender::send_end(const std::string& device_id) {
-    (void)device_id; // device id known by WsClient
-
+bool WsSender::send_end() {
     return run_with_retries(
-        retry_send_,
+        policy_.retry_send,
         "WS send_end",
         [&]() { return _send_end(); }
     );

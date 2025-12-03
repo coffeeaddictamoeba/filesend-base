@@ -1,3 +1,4 @@
+#include <cstring>
 #include <iostream>
 #include <thread>
 
@@ -5,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-bool FileSender::send_one_file(const std::string& file_path, const std::string& device_id) {
+bool FileSender::send_one_file(const std::string& file_path) {
     fs::path p(file_path);
     if (!fs::exists(p) || !fs::is_regular_file(p)) {
         fprintf(
@@ -17,16 +18,16 @@ bool FileSender::send_one_file(const std::string& file_path, const std::string& 
     }
 
     std::unordered_set<std::string> dummy;
-    bool ok = process_one_file(p, device_id, dummy);
-    if (ok) sender_.send_end(device_id);    // Optionally send_end for single file
+    bool ok = process_one_file(p, dummy);
+    if (ok) sender_.send_end();    // Optionally send_end for single file
 
     return ok;
 }
 
-bool FileSender::process_one_file(const fs::path& p, const std::string& device_id, std::unordered_set<std::string>& processed) {
+bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::string>& processed) {
     const std::string name = p.filename().string();
 
-    if (db_ && (fs::equivalent(p, db_->db_path()) || db_->is_sent(p.string()))) {
+    if (db_ && ((strcmp(name.c_str(), DB_NAME) == 0) || db_->is_sent(p.string()))) {
         fprintf(
             stdout,
             "[INFO] Skipping already sent file (DB): %s\n", p.c_str()
@@ -44,7 +45,7 @@ bool FileSender::process_one_file(const fs::path& p, const std::string& device_i
         "[INFO] Processing file: %s\n", p.c_str()
     );
 
-    if (!encrypt_in_place(enc_, p.string())) {
+    if (!encrypt_in_place(sender_.get_policy(), p.string())) {
         fprintf(
             stderr,
             "[ERROR] Encryption failed for %s\n", p.c_str()
@@ -52,7 +53,7 @@ bool FileSender::process_one_file(const fs::path& p, const std::string& device_i
         return false;
     }
 
-    bool sent = sender_.send_file(p.string(), device_id, enc_.flags);
+    bool sent = sender_.send_file(p.string());
     if (!sent) {
         fprintf(
             stderr,
@@ -75,8 +76,7 @@ bool FileSender::process_one_file(const fs::path& p, const std::string& device_i
     return true;
 }
 
-
-bool FileSender::send_files_from_path(const std::string& path, const std::string& device_id, std::chrono::seconds timeout) {
+bool FileSender::send_files_from_path(const std::string& path, std::chrono::seconds timeout) {
     fs::path root(path);
 
     if (!fs::exists(root)) {
@@ -89,9 +89,9 @@ bool FileSender::send_files_from_path(const std::string& path, const std::string
 
     // Single file mode
     if (fs::is_regular_file(root)) {
-        bool ok = process_one_file(root, device_id, *static_cast<std::unordered_set<std::string>*>(nullptr));
+        bool ok = process_one_file(root, *static_cast<std::unordered_set<std::string>*>(nullptr));
         if (ok) {
-            sender_.send_end(device_id);
+            sender_.send_end();
         }
         return ok;
     }
@@ -120,7 +120,7 @@ bool FileSender::send_files_from_path(const std::string& path, const std::string
 
             if (processed.count(name)) continue;
 
-            if (!process_one_file(p, device_id, processed)) {
+            if (!process_one_file(p,  processed)) {
                 fprintf(
                     stderr,
                     RED "[ERROR] Warning: failed to process %s\n" RESET, p.c_str()
@@ -148,10 +148,10 @@ bool FileSender::send_files_from_path(const std::string& path, const std::string
 
                 // If DB is NOT needed on server, comment
                 if (db_ && !db_->db_path().empty()) {
-                    sender_.send_file(db_->db_path(), device_id, enc_.flags);
+                    sender_.send_file(db_->db_path());
                 }
 
-                sender_.send_end(device_id);
+                sender_.send_end();
                 return true;
             }
         }
@@ -159,6 +159,6 @@ bool FileSender::send_files_from_path(const std::string& path, const std::string
         std::this_thread::sleep_for(poll_interval);
     }
 
-    sender_.send_end(device_id);
+    sender_.send_end();
     return true;
 }

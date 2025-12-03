@@ -103,7 +103,7 @@ bool file_db::save() const {
             << static_cast<long>(e.mtime) << '|'
             << static_cast<long long>(e.size) << '|'
             << (e.sent_ok ? 1 : 0) << '|'
-            << (e.sha_hex.empty() ? "" : e.sha_hex)
+            //<< (e.sha_hex.empty() ? "" : e.sha_hex)
             << '\n';
     }
 
@@ -138,14 +138,14 @@ bool file_db::insert(const std::string& file_path) {
         return false;
     }
 
-    char sha[crypto_hash_sha256_BYTES * 2 + 1];
-    if (compute_file_sha256_hex(file_path.c_str(), sha, sizeof(sha)) != 0) {
-        fprintf(
-            stderr, 
-            "[DB] Failed to compute SHA for %s\n", file_path.c_str()
-        );
-        return false;
-    }
+    // char sha[crypto_hash_sha256_BYTES * 2 + 1];
+    // if (compute_file_sha256_hex(file_path.c_str(), sha, sizeof(sha)) != 0) {
+    //     fprintf(
+    //         stderr, 
+    //         "[DB] Failed to compute SHA for %s\n", file_path.c_str()
+    //     );
+    //     return false;
+    // }
 
     int idx = find_file(file_path);
     if (idx < 0) {
@@ -154,20 +154,20 @@ bool file_db::insert(const std::string& file_path) {
         e.mtime      = mtime;
         e.size       = size;
         e.sent_ok    = true;
-        e.sha_hex    = std::move(sha);
+        //e.sha_hex    = std::move(sha);
         entries_.push_back(std::move(e));
     } else {
         auto& e = entries_[idx];
         e.mtime   = mtime;
         e.size    = size;
         e.sent_ok = true;
-        e.sha_hex = std::move(sha);
+        //e.sha_hex = std::move(sha);
     }
 
     return save();
 }
 
-bool file_db::clean() {
+bool file_db::clear() {
     entries_.clear();
     idx_by_path_.clear();
 
