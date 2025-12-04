@@ -19,28 +19,6 @@
 #define ENC_FLAG_RESERVED2  (1u << 4)
 
 typedef struct {
-    char* mode;          // "send" / "encrypt" / "decrypt"
-    char* init_path;     // file or directory
-    char* dest_path;     // for encrypt/decrypt (file or dir)
-
-    char* url;           // send mode
-
-    char* key_path;
-    char* dec_key_path;
-    char* cert_path;
-    
-    int   use_ws;        // 0 = use https, >0 = use websocket
-
-    int  retry_enabled;   // 0 = no retry, 1 = allow retry
-    int  max_retries;     // how many attempts per file (total)
-    int  timeout_secs;    // 0 = no monitoring, >0 = watch dir
-
-    int  batch_size;
-
-    uint32_t flags;      // |Res|Res|All|Sym|Enc|
-} filesend_config_t;
-
-typedef struct {
     uint64_t size;
     uint64_t mtime;
     uint32_t pmode;
@@ -80,6 +58,11 @@ int decrypt_file_asymmetric(
     const char* enc_path, 
     const char* dec_path, 
     int dec_all
+);
+
+int exec_on_file(
+    const char* file_path,
+    const char* exec_s
 );
 
 #endif // FILE_UTILS_H

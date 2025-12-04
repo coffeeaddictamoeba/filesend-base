@@ -21,7 +21,7 @@ extern "C" {
 
 // Retry configuration
 struct retry_policy_t {
-    int max_attempts{MAX_RECONNECTS};
+    int max_attempts{DEFAULT_RETRIES};
     std::chrono::milliseconds delay{WAIT_BEFORE_RECONNECT};
 
     bool enabled() const { return max_attempts > 1; }
@@ -29,8 +29,9 @@ struct retry_policy_t {
 
 // Encryption configuration
 struct enc_policy_t {
-    uint32_t flags{0};         // ENC_FLAG_ENABLED, ENC_FLAG_SYMMETRIC, ENC_FLAG_ALL...
+    uint32_t flags{0};         // |Res|Res|All|Sym|Enc|
     std::string key_path;      // could be symmetric or public key path depending on flags
+    std::string dec_key_path;  // only for decrypt
 };
 
 // Send configuration
@@ -40,6 +41,7 @@ struct send_policy_t {
     retry_policy_t retry_connect;
     enc_policy_t enc_p;
     std::string cert_path;
+    std::string url;
 };
 
 class Sender {

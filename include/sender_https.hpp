@@ -8,7 +8,6 @@
 class HttpsSender : public Sender {
 public:
     HttpsSender(
-        const std::string& url,
         const std::string& device_id,
         send_policy_t policy
     );
@@ -19,7 +18,6 @@ public:
     bool send_end() override;
 
 private:
-    std::string url_;
     std::string device_id_;
     send_policy_t policy_;
 

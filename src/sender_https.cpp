@@ -3,7 +3,7 @@
 
 #include "../include/sender_https.hpp"
 
-HttpsSender::HttpsSender(const std::string& url, const std::string& device_id, send_policy_t policy) : url_(url), device_id_(device_id), policy_(policy) {
+HttpsSender::HttpsSender(const std::string& device_id, send_policy_t policy) : device_id_(device_id), policy_(policy) {
     curl_ = curl_easy_init();
     if (!curl_) {
         throw std::runtime_error("curl_easy_init failed");
@@ -46,7 +46,7 @@ bool HttpsSender::_send_file(const std::string& file_path) {
     curl_mime_name(fl, "flags");
     curl_mime_data(fl, buf, CURL_ZERO_TERMINATED);
 
-    curl_easy_setopt(curl_, CURLOPT_URL, url_.c_str());
+    curl_easy_setopt(curl_, CURLOPT_URL, policy_.url.c_str());
     curl_easy_setopt(curl_, CURLOPT_MIMEPOST, mime);
 
     CURLcode res = curl_easy_perform(curl_);
@@ -100,7 +100,7 @@ bool HttpsSender::_send_end() {
     curl_mime_name(dev, "device_id");
     curl_mime_data(dev, device_id_.c_str(), CURL_ZERO_TERMINATED);
 
-    curl_easy_setopt(curl_, CURLOPT_URL, url_.c_str());
+    curl_easy_setopt(curl_, CURLOPT_URL, policy_.url.c_str());
     curl_easy_setopt(curl_, CURLOPT_MIMEPOST, mime);
 
     CURLcode res = curl_easy_perform(curl_);
