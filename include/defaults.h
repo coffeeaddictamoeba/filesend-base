@@ -9,6 +9,8 @@
 
 #define DB_NAME ".filesend_cache"
 
+#define DEFAULT_COMPRESSION "tar"
+
 // Default paths for creation of keys. Do not set to actual key locations.
 #define DEFAULT_SYM_KEY_PATH "sym_key.bin"
 #define DEFAULT_PR_KEY_PATH  "pr_key.bin"

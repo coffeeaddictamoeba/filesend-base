@@ -17,7 +17,7 @@ public:
 
 private:
     std::string device_id_;
-    send_policy_t policy_;
+    const send_policy_t& policy_;
 
     WsClient client_;
     bool connected_{false};

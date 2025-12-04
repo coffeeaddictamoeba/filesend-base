@@ -1,5 +1,7 @@
+#include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <string>
 #include <thread>
 
 #include "../include/dir_utils.h"
@@ -42,7 +44,7 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
 
     fprintf(
         stdout, 
-        "[INFO] Processing file: %s\n", p.c_str()
+        "[INFO] Processing file: %s (encryption policy: %d)\n", p.c_str(), sender_.get_policy().enc_p.flags
     );
 
     if (!encrypt_in_place(sender_.get_policy(), p.string())) {
@@ -76,6 +78,64 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
     return true;
 }
 
+bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::string>& processed, int& batch_id) {
+    const std::string name = p.filename().string();
+
+    if (!batch_->ready) {
+        if (db_ && ((strcmp(name.c_str(), DB_NAME) == 0) || db_->is_sent(p.string()))) {
+            fprintf(
+                stdout,
+                "[INFO] Skipping already sent file inside batch (DB): %s\n", p.c_str()
+            );
+            processed.insert(name);
+            return true;
+        }
+
+        if (processed.count(name)) return true;
+
+        batch_->add(p);
+
+        processed.insert(name);
+
+        if (db_) {
+            if (!db_->insert(p.string())) {
+                fprintf(
+                    stderr,
+                    "[ERROR] Warning: failed to insert %s to DB\n", p.c_str()
+                );
+            }
+        }
+
+        fprintf(
+            stdout, 
+            "[INFO] Batch: adding file %s (queue size: %zu)\n", p.c_str(), batch_->pending.size()
+        );
+    } 
+    
+    if (batch_->ready) {
+        std::string compressed = "batch_" + std::to_string(batch_id) + "." + DEFAULT_COMPRESSION;
+        batch_->compress(compressed, DEFAULT_COMPRESSION);
+        std::unordered_set<std::string> dummy;
+        if (!process_one_file(compressed, dummy)) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Warning: failed to process batch %s\n" RESET, p.c_str()
+            );
+            return false;
+        }
+
+        fprintf(
+        stdout, 
+        "[INFO] Sending batch: %s\n", p.c_str()
+        );
+
+        batch_id++;
+        batch_->clear();
+    }
+    
+    return true;
+}
+
 bool FileSender::send_files_from_path(const std::string& path, std::chrono::seconds timeout) {
     fs::path root(path);
 
@@ -89,7 +149,8 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
 
     // Single file mode
     if (fs::is_regular_file(root)) {
-        bool ok = process_one_file(root, *static_cast<std::unordered_set<std::string>*>(nullptr));
+        std::unordered_set<std::string> dummy; // more optimal solution?
+        bool ok = process_one_file(root, dummy);
         if (ok) {
             sender_.send_end();
         }
@@ -110,6 +171,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
     const auto poll_interval = std::chrono::seconds(1);
 
     while (true) {
+        int batch_id = 0;
         bool new_in_this_round = false;
 
         for (auto& entry : fs::directory_iterator(root)) {
@@ -120,12 +182,22 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
 
             if (processed.count(name)) continue;
 
-            if (!process_one_file(p,  processed)) {
-                fprintf(
-                    stderr,
-                    RED "[ERROR] Warning: failed to process %s\n" RESET, p.c_str()
-                );
-                continue;
+            if (batch_->size > 1) {
+                if (!process_one_batch(p, processed, batch_id)) {
+                    fprintf(
+                        stderr,
+                        RED "[ERROR] Warning: failed to process batch %s\n" RESET, p.c_str()
+                    );
+                    continue;
+                }
+            } else {
+                if (!process_one_file(p,  processed)) {
+                    fprintf(
+                        stderr,
+                        RED "[ERROR] Warning: failed to process %s\n" RESET, p.c_str()
+                    );
+                    continue;
+                }
             }
 
             new_in_this_round = true;

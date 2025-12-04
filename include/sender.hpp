@@ -46,9 +46,11 @@ struct send_policy_t {
 
 class Sender {
 public:
+    explicit Sender(const send_policy_t& policy) : policy_(policy) {}
+
     virtual ~Sender() = default;
 
-    virtual send_policy_t get_policy() const { return policy_;}
+    const send_policy_t& get_policy() const { return policy_; }
 
     // Send ONE file. Path may be already encrypted; flags tell server how to handle.
     virtual bool send_file(const std::string& file_path) = 0;
@@ -86,7 +88,13 @@ bool run_with_retries(const retry_policy_t& policy, const std::string& what, fun
 
 // encrypt in-place
 inline bool encrypt_in_place(const send_policy_t& policy, const std::string& file_path) {
-    if (!(policy.enc_p.flags & ENC_FLAG_ENABLED)) return true;
+    if (!(policy.enc_p.flags & ENC_FLAG_ENABLED)) {
+        fprintf(
+            stderr, 
+            "[DEBUG] No encryption policy provided. Sending plain file.\n"
+        );
+        return true;
+    }
 
     const char* key_path = policy.enc_p.key_path.empty() ? nullptr : policy.enc_p.key_path.c_str();
 

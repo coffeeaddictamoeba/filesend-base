@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -146,7 +148,7 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
     cf.mode      = argv[1];
     cf.device_id = "pi";
 
-    cf.use_batches = 0;
+    cf.batch_size = 1;
 
     cf.policy.retry_connect.max_attempts = DEFAULT_RETRIES;
     cf.policy.retry_send.max_attempts    = DEFAULT_RETRIES;
@@ -210,8 +212,8 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
                     );
                     return -1;
                 }
-                // cf->batch_size = std::atoi(argv[++i]);
-                // if (cf->batch_size < 0) cf->batch_size = 0;
+                
+                cf.batch_size = std::max((int)cf.batch_size, std::atoi(argv[++i]));
 
             } else if (std::strcmp(arg, "--timeout") == 0) {
                 if (i + 1 >= argc) {
@@ -222,8 +224,10 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
                     return -1;
                 }
 
-                std::chrono::seconds t = std::chrono::seconds(std::atoi(argv[++i]));
-                cf.policy.timeout = t > cf.policy.timeout ? t : cf.policy.timeout;
+                cf.policy.timeout = std::max(
+                    cf.policy.timeout, 
+                    std::chrono::seconds(std::atoi(argv[++i]))
+                );
 
             } else if (std::strcmp(arg, "--retry") == 0) {
                 if (i + 1 >= argc) {
@@ -255,7 +259,8 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
 
     } else if (std::strcmp(cf.mode.c_str(), "encrypt") == 0 || std::strcmp(cf.mode.c_str(), "decrypt") == 0) {
         cf.init_path = argv[2];
-        cf.policy.enc_p.flags    |= ENC_FLAG_ENABLED;
+        
+        cf.policy.enc_p.flags |= ENC_FLAG_ENABLED;
 
         for (int i = 3; i < argc; ++i) {
             const char* arg = argv[i];
@@ -289,8 +294,10 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
                     return -1;
                 }
 
-                std::chrono::seconds t = std::chrono::seconds(std::atoi(argv[++i]));
-                cf.policy.timeout = t > cf.policy.timeout ? t : cf.policy.timeout;
+                cf.policy.timeout = std::max(
+                    cf.policy.timeout, 
+                    std::chrono::seconds(std::atoi(argv[++i]))
+                );
 
             } else {
                 std::fprintf(
@@ -364,11 +371,24 @@ int main(int argc, char** argv) {
                 cf.device_id,
                 cf.policy
             );
-        }        
+        }
 
-        FileSender s(*sender, &db);
+        std::unique_ptr<FileSender> s;
+        if (cf.batch_size > 1) {
+            batch_t batch(cf.batch_size);
+            s = std::make_unique<FileSender>(
+                *sender, 
+                batch, 
+                &db
+            );
+        } else {
+            s = std::make_unique<FileSender>(
+                *sender,
+                &db
+            );
+        }
         
-        bool ok = s.send_files_from_path(cf.init_path, cf.policy.timeout);
+        bool ok = s->send_files_from_path(cf.init_path, cf.policy.timeout);
 
         sender->send_end();
 

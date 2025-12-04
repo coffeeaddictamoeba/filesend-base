@@ -3,10 +3,10 @@
 #include "../include/sender_ws.hpp"
 
 WsSender::WsSender(const std::string& device_id, send_policy_t& policy)
-    : device_id_(device_id),
-      policy_(policy),
-      client_(policy_.url, device_id, policy_.cert_path) {
-}
+    : Sender(policy),
+      device_id_(device_id),
+      policy_(policy), // improve later
+      client_(policy_.url, device_id, policy_.cert_path) {}
 
 bool WsSender::is_connected() {
     if (connected_) return true;
