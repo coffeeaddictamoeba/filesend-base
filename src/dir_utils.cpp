@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -101,7 +102,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
             if (!db_->insert(p.string())) {
                 fprintf(
                     stderr,
-                    "[ERROR] Warning: failed to insert %s to DB\n", p.c_str()
+                    "[ERROR] DB: failed to insert %s\n", p.c_str()
                 );
             }
         }
@@ -113,10 +114,19 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
     } 
     
     if (batch_->ready) {
-        std::string compressed = "batch_" + std::to_string(batch_id) + "." + DEFAULT_COMPRESSION;
-        batch_->compress(compressed, DEFAULT_COMPRESSION);
+        auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+
+        std::ostringstream compressed;
+        compressed << "batch_" 
+                   << std::setw(3) << std::setfill('0') << batch_id << "_" 
+                   << std::put_time(std::localtime(&now), DEFAULT_DATE_FORMAT) << "." 
+                   << DEFAULT_COMPRESSION;
+        
+        std::string compressed_str = compressed.str();
+        batch_->compress(compressed_str, DEFAULT_COMPRESSION);
+
         std::unordered_set<std::string> dummy;
-        if (!process_one_file(compressed, dummy)) {
+        if (!process_one_file(compressed_str, dummy)) {
             fprintf(
                 stderr,
                 RED "[ERROR] Warning: failed to process batch %s\n" RESET, p.c_str()
@@ -126,7 +136,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
 
         fprintf(
         stdout, 
-        "[INFO] Sending batch: %s\n", p.c_str()
+        "[INFO] Sending batch: %s (queue size: %zu/%zu)\n", compressed_str.c_str(), batch_->pending.size(), batch_->size
         );
 
         batch_id++;
@@ -134,6 +144,10 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
     }
     
     return true;
+}
+
+bool FileSender::send_files_from_path(const std::string& path) {
+    return send_files_from_path(path, sender_.get_policy().timeout);
 }
 
 bool FileSender::send_files_from_path(const std::string& path, std::chrono::seconds timeout) {
@@ -170,8 +184,9 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
     auto last_new = std::chrono::steady_clock::now();
     const auto poll_interval = std::chrono::seconds(1);
 
+    int batch_id = 1;
+
     while (true) {
-        int batch_id = 0;
         bool new_in_this_round = false;
 
         for (auto& entry : fs::directory_iterator(root)) {
@@ -186,7 +201,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
                 if (!process_one_batch(p, processed, batch_id)) {
                     fprintf(
                         stderr,
-                        RED "[ERROR] Warning: failed to process batch %s\n" RESET, p.c_str()
+                        RED "[ERROR] Warning: failed to process batch %d\n" RESET, batch_id
                     );
                     continue;
                 }
@@ -218,8 +233,28 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
                     "[INFO] No new files for %lld seconds, stopping.\n", (long long)timeout.count()
                 );
 
+                if (batch_->pending.size() > 0) {
+                    batch_->ready = true;
+
+                    fs::path dummy;
+                    if (!process_one_batch(dummy, processed, batch_id)) {
+                        fprintf(
+                            stderr,
+                            RED "[ERROR] Warning: failed to process batch %d (queue size: %zu/%zu)\n" RESET, 
+                            batch_id, batch_->pending.size(), batch_->size
+                        );
+                    }
+                }
+
                 // If DB is NOT needed on server, comment
                 if (db_ && !db_->db_path().empty()) {
+                    if (!encrypt_in_place(sender_.get_policy(), db_->db_path())) {
+                        fprintf(
+                            stderr,
+                            RED "[ERROR] DB: Encryption failed for %s\n" RESET, db_->db_path().c_str()
+                        );
+                        return false;
+                    }
                     sender_.send_file(db_->db_path());
                 }
 

@@ -11,6 +11,8 @@
 
 #define DEFAULT_COMPRESSION "tar"
 
+#define DEFAULT_DATE_FORMAT "%Y%m%d_%H%M%S"
+
 // Default paths for creation of keys. Do not set to actual key locations.
 #define DEFAULT_SYM_KEY_PATH "sym_key.bin"
 #define DEFAULT_PR_KEY_PATH  "pr_key.bin"

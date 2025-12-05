@@ -96,9 +96,7 @@ int process_path_encrypt_decrypt(const filesend_config_t& cf, const std::functio
             continue;
         }
 
-        if (!S_ISREG(fst.st_mode)) {
-            continue;
-        }
+        if (!S_ISREG(fst.st_mode)) continue;
 
         std::string src  = path_buf;
         std::string dest;
@@ -388,7 +386,7 @@ int main(int argc, char** argv) {
             );
         }
         
-        bool ok = s->send_files_from_path(cf.init_path, cf.policy.timeout);
+        bool ok = s->send_files_from_path(cf.init_path);
 
         sender->send_end();
 

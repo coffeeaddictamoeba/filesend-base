@@ -134,6 +134,8 @@ public:
         std::chrono::seconds timeout
     );
 
+    bool send_files_from_path(const std::string& path);
+
 private:
     Sender& sender_;
     file_db* db_;
