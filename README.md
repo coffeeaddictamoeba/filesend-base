@@ -7,7 +7,7 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 ---
 
 ```
-filesend send    [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--all] [--timeout <n>] [--retry <n>] [--no-retry]
+filesend send    [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--all] [--timeout <n>] [--retry <n>] [--no-retry] [--batch <n>]
 filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--timeout <n>]
 filesend decrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--timeout <n>]
 ```
@@ -36,7 +36,8 @@ filesend send [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--al
 * **`--all`** – encrypt file **metadata** as well as contents
 * **`--timeout`** – monitor `<path>` directory until specified timeout
 * **`--retry <n>`** – set the number of retries allowed in case of failed file sending. Default is 3.
-* **`--no-retry`** – sets number of retries to 0
+* **`--no-retry`** – set number of retries to 0
+* **`--batch <n>`** – group `n` files to a compressed batch and send the batch. All policies specified are applied to the **batch** itself, **not the files** inside (i.e. if you use `--encrypt`, only the batch file will be encrypted)
 
 **Environment variables**
 
