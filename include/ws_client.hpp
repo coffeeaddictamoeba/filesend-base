@@ -1,4 +1,3 @@
-// ws_client.hpp
 #pragma once
 
 #include <string>

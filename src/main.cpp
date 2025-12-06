@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
+#include <filesystem>
 #include <string>
 #include <memory>
 #include <chrono>
@@ -126,7 +127,7 @@ void usage(const char* prog) {
         "Usage:\n"
         "  %s send  [--https|--ws]  <path> <url> "
         "[--encrypt symmetric|asymmetric] [--all] "
-        "[--timeout <n>] [--retry <n>] [--no-retry] [--batch <n>]\n"
+        "[--timeout <n>] [--retry <n>] [--no-retry] [--batch <n> <format>]\n"
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
         "[--dest <file>] [--timeout <n>]\n"
         "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
@@ -143,20 +144,18 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
 
     cf = {};
 
-    cf.mode      = argv[1];
-    cf.device_id = "pi";
-
+    cf.mode       = argv[1];
+    cf.device_id  = "pi";
     cf.batch_size = 1;
 
     cf.policy.retry_connect.max_attempts = DEFAULT_RETRIES;
     cf.policy.retry_send.max_attempts    = DEFAULT_RETRIES;
     cf.policy.timeout = std::chrono::seconds(0);
 
-    // envs
-    cf.policy.enc_p.dec_key_path = std::getenv(PR_KEY_ENV);
-    cf.policy.cert_path          = std::getenv(CERT_PATH_ENV);
-
     if (std::strcmp(cf.mode.c_str(), "send") == 0) {
+
+        cf.policy.cert_path = std::getenv(CERT_PATH_ENV);
+
         if (argc < 5) {
             std::fprintf(
                 stderr,
@@ -168,6 +167,15 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
 
         cf.use_ws     = (std::strcmp(argv[2], "--ws") == 0);
         cf.init_path  = argv[3];
+
+        if (!fs::exists(cf.init_path)) {
+            fprintf(
+                stderr, 
+                RED "[ERROR] There is no path with name \"%s\" \r\n" RESET, cf.init_path.c_str()
+            );
+            return -1;
+        }
+
         cf.policy.url = argv[4];
 
         for (int i = 5; i < argc; ++i) {
@@ -203,15 +211,16 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
                 cf.policy.enc_p.flags |= ENC_FLAG_ALL;
 
             } else if (std::strcmp(arg, "--batch") == 0) {
-                if (i + 1 >= argc) {
+                if (i + 2 >= argc) {
                     std::fprintf(
                         stderr,
-                        RED "[ERROR] --batch requires integer size\n" RESET
+                        RED "[ERROR] --batch requires integer size and compression format\n" RESET
                     );
                     return -1;
                 }
                 
                 cf.batch_size = std::max((int)cf.batch_size, std::atoi(argv[++i]));
+                cf.batch_format = argv[++i];
 
             } else if (std::strcmp(arg, "--timeout") == 0) {
                 if (i + 1 >= argc) {
@@ -259,6 +268,10 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
         cf.init_path = argv[2];
         
         cf.policy.enc_p.flags |= ENC_FLAG_ENABLED;
+
+        if (strcmp(cf.mode.c_str(), "decrypt") == 0) {
+            cf.policy.enc_p.dec_key_path = std::getenv(PR_KEY_ENV);
+        }
 
         for (int i = 3; i < argc; ++i) {
             const char* arg = argv[i];
@@ -373,7 +386,7 @@ int main(int argc, char** argv) {
 
         std::unique_ptr<FileSender> s;
         if (cf.batch_size > 1) {
-            batch_t batch(cf.batch_size);
+            batch_t batch(cf.batch_size, cf.batch_format);
             s = std::make_unique<FileSender>(
                 *sender, 
                 batch, 

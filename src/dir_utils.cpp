@@ -109,7 +109,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
 
         fprintf(
             stdout, 
-            "[INFO] Batch: adding file %s (queue size: %zu)\n", p.c_str(), batch_->pending.size()
+            "[INFO] Batch: adding file %s (queue size: %zu)\n", p.c_str(), batch_->qsize()
         );
     } 
     
@@ -120,10 +120,10 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
         compressed << "batch_" 
                    << std::setw(3) << std::setfill('0') << batch_id << "_" 
                    << std::put_time(std::localtime(&now), DEFAULT_DATE_FORMAT) << "." 
-                   << DEFAULT_COMPRESSION;
+                   << batch_->format;
         
         std::string compressed_str = compressed.str();
-        batch_->compress(compressed_str, DEFAULT_COMPRESSION);
+        batch_->compress(compressed_str, batch_->format);
 
         std::unordered_set<std::string> dummy;
         if (!process_one_file(compressed_str, dummy)) {
@@ -136,7 +136,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
 
         fprintf(
         stdout, 
-        "[INFO] Sending batch: %s (queue size: %zu/%zu)\n", compressed_str.c_str(), batch_->pending.size(), batch_->size
+        "[INFO] Sending batch: %s (queue size: %zu/%zu)\n", compressed_str.c_str(), batch_->qsize(), batch_->size
         );
 
         batch_id++;
@@ -233,7 +233,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
                     "[INFO] No new files for %lld seconds, stopping.\n", (long long)timeout.count()
                 );
 
-                if (batch_->pending.size() > 0) {
+                if (batch_->qsize() > 0) {
                     batch_->ready = true;
 
                     fs::path dummy;
@@ -241,7 +241,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
                         fprintf(
                             stderr,
                             RED "[ERROR] Warning: failed to process batch %d (queue size: %zu/%zu)\n" RESET, 
-                            batch_id, batch_->pending.size(), batch_->size
+                            batch_id, batch_->qsize(), batch_->size
                         );
                     }
                 }

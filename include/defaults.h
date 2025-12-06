@@ -9,7 +9,7 @@
 
 #define DB_NAME ".filesend_cache"
 
-#define DEFAULT_COMPRESSION "tar"
+#define DEFAULT_COMPRESSION_FORMAT "tar"
 
 #define DEFAULT_DATE_FORMAT "%Y%m%d_%H%M%S"
 

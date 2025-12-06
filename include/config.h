@@ -8,7 +8,8 @@ struct filesend_config_t {
     std::string init_path;     // file or directory
     std::string dest_path;     // for encrypt/decrypt (file or dir)
     std::string device_id;
-
+    
+    std::string batch_format;
     std::size_t batch_size;
 
     int use_ws;               // 0 = use https, >0 = use websocket

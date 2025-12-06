@@ -1,7 +1,7 @@
 CXX       := g++
 CXXFLAGS  := -std=c++17 -Wall -Wextra -O2 -Iinclude
 CFLAGS    := -Wall -Wextra -O2 -Iinclude
-LDFLAGS   := -lsodium -lcurl -lssl -lcrypto -lpthread
+LDFLAGS   := -lsodium -lcurl -lssl -lcrypto -lpthread -lzip -larchive
 
 SRC_DIR   := src
 OBJ_DIR   := obj
