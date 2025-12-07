@@ -49,6 +49,18 @@ struct batch_t {
         }
     }
 
+    void remove(const std::string file_path) {
+        if (pending.empty()) return;
+
+        pending.erase(
+            find(
+                pending.begin(), 
+                pending.end(), 
+                file_path
+            )
+        );
+    }
+
     void clear() {
         pending.clear();
         ready = false;
@@ -56,7 +68,7 @@ struct batch_t {
 
     size_t qsize() { return pending.size(); }
 
-    bool compress(const std::string& out_path, const std::string& format) const {
+    bool compress(const std::string& out_path, const std::string& format) {
         if (pending.empty()) return false;
 
         fprintf(
@@ -94,76 +106,129 @@ struct batch_t {
 private:
     std::vector<std::string> pending;
 
-    bool _compress_tar(const std::string& out_path, bool gzipped) const {
-        struct archive *a;
-        struct archive_entry *entry;
-        int r;
-
-        a = archive_write_new();
-        if (gzipped) {
-            r = archive_write_set_format_pax_restricted(a);
-            if (r != ARCHIVE_OK) {
-                fprintf(
-                    stderr, 
-                    RED "[ERROR] Failed to set tar format: %s\n" RESET, archive_error_string(a)
-                );
-                return false;
-            }
-            r = archive_write_add_filter_gzip(a);
-            if (r != ARCHIVE_OK) {
-                fprintf(
-                    stderr, 
-                    RED "[ERROR] Failed to add gzip filter: %s\n" RESET, archive_error_string(a)
-                );
-                return false;
-            }
-        } else {
-            r = archive_write_add_filter_none(a);
-            if (r != ARCHIVE_OK) {
-                fprintf(
-                    stderr,
-                    RED "[ERROR] Failed to add filter: %s\n" RESET, archive_error_string(a)
-                );
-                return false;
-            }
+    bool _compress_tar(const std::string& out_path, bool gzipped) {
+        struct archive *a = archive_write_new();
+        if (!a) {
+            fprintf(
+                stderr, 
+                RED "[ERROR] archive_write_new() failed\n" RESET
+            );
+            return false;
         }
+
+        archive_write_set_format_pax_restricted(a);
+
+        int r = gzipped
+        ? archive_write_add_filter_gzip(a)
+        : archive_write_add_filter_none(a);
+        
+        if (r != ARCHIVE_OK) {
+            fprintf(
+                stderr, 
+                RED "[ERROR] Failed to add filter: %s\n" RESET, archive_error_string(a)
+            );
+            archive_write_free(a);
+            return false;
+        }
+
         r = archive_write_open_filename(a, out_path.c_str());
         if (r != ARCHIVE_OK) {
             fprintf(
                 stderr, 
                 RED "[ERROR] Failed to open output file: %s\n" RESET, archive_error_string(a)
             );
+            archive_write_free(a);
             return false;
         }
 
+        fs::path out(out_path);
+        std::string batch_dir = out.stem().string();
+        if (out.extension() == ".gz") {
+            batch_dir = out.stem().stem().string();
+        }
+
         for (const auto& file_path : pending) {
-            entry = archive_entry_new();
-            archive_entry_set_pathname(entry, file_path.c_str());
-            archive_entry_set_size(entry, std::filesystem::file_size(file_path));
+            fs::path p(file_path);
+
+            std::error_code ec;
+            auto sz = fs::file_size(p, ec);
+            if (ec) {
+                fprintf(
+                    stderr,
+                    RED "[ERROR] Failed to get size for %s: %s\n" RESET, p.string().c_str(), ec.message().c_str()
+                );
+                archive_write_free(a);
+                return false;
+            }
+
+            struct archive_entry *entry = archive_entry_new();
+            if (!entry) {
+                fprintf(
+                    stderr, 
+                    RED "[ERROR] archive_entry_new() failed\n" RESET
+                );
+                archive_write_free(a);
+                return false;
+            }
+
+            std::string name_in_tar = batch_dir.empty() ? p.filename().string() : (batch_dir + "/" + p.filename().string());
+
+            archive_entry_set_pathname(entry, name_in_tar.c_str());
+            archive_entry_set_size(entry, sz);
             archive_entry_set_filetype(entry, AE_IFREG);
+            archive_entry_set_perm(entry, 0644);
 
             r = archive_write_header(a, entry);
             if (r != ARCHIVE_OK) {
                 fprintf(
                     stderr,
-                    RED "[ERROR] Failed to write header for %s: %s\n" RESET, file_path.c_str(), archive_error_string(a)
+                    RED "[ERROR] Failed to write header for %s: %s\n" RESET, p.string().c_str(), archive_error_string(a)
                 );
+                archive_entry_free(entry);
+                archive_write_free(a);
                 return false;
             }
 
-            std::ifstream file(file_path, std::ios::binary);
-            char buffer[1024];
-            while (file) {
-                file.read(buffer, sizeof(buffer));
-                archive_write_data(a, buffer, file.gcount());
-            }
-
-            if (!file) {
+            std::ifstream file(p, std::ios::binary);
+            if (!file.is_open()) {
                 fprintf(
                     stderr,
-                    RED "[ERROR] Failed to read file: %s\n" RESET, file_path.c_str()
+                    RED "[ERROR] Failed to open file: %s\n" RESET, p.string().c_str()
                 );
+                archive_entry_free(entry);
+                archive_write_free(a);
                 return false;
+            }
+
+            char buffer[8192];
+            while (true) {
+                file.read(buffer, sizeof(buffer));
+                std::streamsize bytes_read = file.gcount();
+                if (bytes_read > 0) {
+                    la_ssize_t written = archive_write_data(a, buffer, bytes_read);
+                    if (written < 0 || static_cast<std::size_t>(written) != static_cast<std::size_t>(bytes_read)) {
+                        fprintf(
+                            stderr,
+                            RED "[ERROR] Failed to write data for %s: %s\n" RESET,
+                            p.string().c_str(), archive_error_string(a)
+                        );
+                        archive_entry_free(entry);
+                        archive_write_free(a);
+                        return false;
+                    }
+                }
+
+                if (file.eof()) break;
+
+                if (file.bad()) {
+                    fprintf(
+                        stderr,
+                        RED "[ERROR] Failed to read file: %s\n" RESET, p.string().c_str()
+                    );
+                    archive_entry_free(entry);
+                    archive_write_free(a);
+                    return false;
+                }
             }
 
             archive_entry_free(entry);
@@ -175,6 +240,7 @@ private:
                 stderr, 
                 RED "[ERROR] Failed to close tar archive: %s\n" RESET, archive_error_string(a)
             );
+            archive_write_free(a);
             return false;
         }
 
@@ -258,12 +324,12 @@ private:
 
     bool process_one_file(
         const std::filesystem::path& p,
-        std::unordered_set<std::string>& processed
+        std::unordered_set<std::string>* processed
     );
 
     bool process_one_batch(
         const fs::path& p, 
-        std::unordered_set<std::string>& processed,
+        std::unordered_set<std::string>* processed,
         int& batch_id
     );
 };

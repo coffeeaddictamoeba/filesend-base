@@ -113,7 +113,7 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
         return -1;
     }
 
-    file_metadata_t md;
+    file_metadata_t md = {};
     int have_md = 0;
     if (get_file_metadata(plain_path, &md) == 0) {
         have_md = 1;
@@ -279,7 +279,7 @@ int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const
         return -1;
     }
 
-    file_metadata_t md;
+    file_metadata_t md = {};
     int have_md = 0;
 
     if (dec_all) {
@@ -433,7 +433,7 @@ int encrypt_file_asymmetric(const unsigned char* pub_key, const char* plain_path
     }
 
     // Get metadata (always)
-    file_metadata_t md;
+    file_metadata_t md = {};
     if (get_file_metadata(plain_path, &md) != 0) {
         fputs(RED "[ERROR] Failed to get file metadata\n" RESET, stderr);
         fclose(fin);
@@ -600,7 +600,7 @@ int decrypt_file_asymmetric(const unsigned char* pub_key, const unsigned char* p
         return -1;
     }
 
-    file_metadata_t md;
+    file_metadata_t md = {};
     int have_md = 0;
 
     // If metadata was encrypted, read/decrypt that first chunk

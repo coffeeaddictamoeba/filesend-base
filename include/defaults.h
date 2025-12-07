@@ -1,6 +1,8 @@
 #ifndef DEFAULTS_H
 #define DEFAULTS_H
 
+#include <string>
+
 // Colorful logs.
 #define RESET   "\033[0m"
 #define RED     "\033[31m"      // Errors
@@ -24,5 +26,23 @@
 
 #define DB_INIT_SIZE   128
 #define MAX_SENT_FILES 4096
+
+constexpr const char* PUB_KEY_ENV   = "PUB_KEY_PATH";
+constexpr const char* PR_KEY_ENV    = "PR_KEY_PATH";
+constexpr const char* SYM_KEY_ENV   = "SYM_KEY_PATH";
+constexpr const char* CERT_PATH_ENV = "CERT_PATH";
+
+inline const char* getenv_or_default(const char* env_name, const char* default_val) {
+    const char* env = std::getenv(env_name);
+    if (env) {
+        return env;
+    } else {
+        std::fprintf(
+            stderr,
+            YELLOW "[WARN] No %s found in environment. Using default: %s\n" RESET, env_name, default_val
+        );
+        return default_val;
+    }
+}
 
 #endif // DEFAULTS_H

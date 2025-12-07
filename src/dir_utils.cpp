@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -20,14 +21,13 @@ bool FileSender::send_one_file(const std::string& file_path) {
         return false;
     }
 
-    std::unordered_set<std::string> dummy;
-    bool ok = process_one_file(p, dummy);
+    bool ok = process_one_file(p, nullptr);
     if (ok) sender_.send_end();    // Optionally send_end for single file
 
     return ok;
 }
 
-bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::string>& processed) {
+bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::string>* processed) {
     const std::string name = p.filename().string();
 
     if (db_ && ((strcmp(name.c_str(), DB_NAME) == 0) || db_->is_sent(p.string()))) {
@@ -35,11 +35,11 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
             stdout,
             "[INFO] Skipping already sent file (DB): %s\n", p.c_str()
         );
-        processed.insert(name);
+        if (processed) processed->insert(name);
         return true;
     }
 
-    if (processed.count(name)) {
+    if (processed && processed->count(name)) {
         return true;
     }
 
@@ -65,7 +65,7 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
         return false;
     }
 
-    processed.insert(name);
+    if (processed) processed->insert(name);
 
     if (db_) {
         if (!db_->insert(p.string())) {
@@ -79,7 +79,7 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
     return true;
 }
 
-bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::string>& processed, int& batch_id) {
+bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::string>* processed, int& batch_id) {
     const std::string name = p.filename().string();
 
     if (!batch_->ready) {
@@ -88,15 +88,15 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
                 stdout,
                 "[INFO] Skipping already sent file inside batch (DB): %s\n", p.c_str()
             );
-            processed.insert(name);
+            processed->insert(name);
             return true;
         }
 
-        if (processed.count(name)) return true;
+        if (processed->count(name)) return true;
 
         batch_->add(p);
 
-        processed.insert(name);
+        processed->insert(name);
 
         if (db_) {
             if (!db_->insert(p.string())) {
@@ -123,14 +123,20 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
                    << batch_->format;
         
         std::string compressed_str = compressed.str();
-        batch_->compress(compressed_str, batch_->format);
+        if (!batch_->compress(compressed_str, batch_->format)) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Compression failed in batch %s\n" RESET, compressed_str.c_str()
+            );
+            batch_->clear();
+        }
 
-        std::unordered_set<std::string> dummy;
-        if (!process_one_file(compressed_str, dummy)) {
+        if (!process_one_file(compressed_str, nullptr)) {
             fprintf(
                 stderr,
                 RED "[ERROR] Warning: failed to process batch %s\n" RESET, p.c_str()
             );
+            batch_->clear();
             return false;
         }
 
@@ -163,8 +169,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
 
     // Single file mode
     if (fs::is_regular_file(root)) {
-        std::unordered_set<std::string> dummy; // more optimal solution?
-        bool ok = process_one_file(root, dummy);
+        bool ok = process_one_file(root, nullptr);
         if (ok) {
             sender_.send_end();
         }
@@ -198,7 +203,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
             if (processed.count(name)) continue;
 
             if (batch_->size > 1) {
-                if (!process_one_batch(p, processed, batch_id)) {
+                if (!process_one_batch(p, &processed, batch_id)) {
                     fprintf(
                         stderr,
                         RED "[ERROR] Warning: failed to process batch %d\n" RESET, batch_id
@@ -206,7 +211,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
                     continue;
                 }
             } else {
-                if (!process_one_file(p,  processed)) {
+                if (!process_one_file(p,  &processed)) {
                     fprintf(
                         stderr,
                         RED "[ERROR] Warning: failed to process %s\n" RESET, p.c_str()
@@ -230,17 +235,23 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
             if (now - last_new >= timeout) {
                 fprintf(
                     stdout,
-                    "[INFO] No new files for %lld seconds, stopping.\n", (long long)timeout.count()
+                    YELLOW "[INFO] No new files for %lld seconds, stopping.\n" RESET, (long long)timeout.count()
                 );
 
                 if (batch_->qsize() > 0) {
+
+                    printf(
+                        "[INFO] Timeout reached, sending last batch: %d (queue size: %zu/%zu).\n", 
+                        batch_id, batch_->qsize(), batch_->size
+                    );
+
                     batch_->ready = true;
 
                     fs::path dummy;
-                    if (!process_one_batch(dummy, processed, batch_id)) {
+                    if (!process_one_batch(dummy, &processed, batch_id)) {
                         fprintf(
                             stderr,
-                            RED "[ERROR] Warning: failed to process batch %d (queue size: %zu/%zu)\n" RESET, 
+                            RED "[ERROR] Warning: failed to process last batch %d (queue size: %zu/%zu)\n" RESET, 
                             batch_id, batch_->qsize(), batch_->size
                         );
                     }

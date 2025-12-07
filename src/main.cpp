@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
+#include <exception>
 #include <filesystem>
 #include <string>
 #include <memory>
@@ -18,11 +19,6 @@
 #include "../include/dir_utils.h"
 #include "../include/file_utils.h"
 #include "../include/db_utils.hpp"
-
-constexpr const char* PUB_KEY_ENV   = "PUB_KEY_PATH";
-constexpr const char* PR_KEY_ENV    = "PR_KEY_PATH";
-constexpr const char* SYM_KEY_ENV   = "SYM_KEY_PATH";
-constexpr const char* CERT_PATH_ENV = "CERT_PATH";
 
 int process_path_encrypt_decrypt(const filesend_config_t& cf, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
     struct stat st{};
@@ -154,8 +150,6 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
 
     if (std::strcmp(cf.mode.c_str(), "send") == 0) {
 
-        cf.policy.cert_path = std::getenv(CERT_PATH_ENV);
-
         if (argc < 5) {
             std::fprintf(
                 stderr,
@@ -177,13 +171,17 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
         }
 
         cf.policy.url = argv[4];
+        cf.policy.cert_path = getenv_or_default(
+            CERT_PATH_ENV, 
+            DEFAULT_CA_CERT_PATH
+        );
 
         for (int i = 5; i < argc; ++i) {
             const char* arg = argv[i];
 
             if (std::strcmp(arg, "--encrypt") == 0) {
                 if (i + 1 >= argc) {
-                    std::fprintf(
+                    fprintf(
                         stderr,
                         RED "[ERROR] --encrypt requires 'symmetric' or 'asymmetric'\n" RESET
                     );
@@ -196,9 +194,15 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
 
                 if (std::strcmp(mode, "symmetric") == 0) {
                     cf.policy.enc_p.flags   |= ENC_FLAG_SYMMETRIC;
-                    cf.policy.enc_p.key_path = std::getenv(SYM_KEY_ENV);
+                    cf.policy.enc_p.key_path = getenv_or_default(
+                        SYM_KEY_ENV, 
+                        DEFAULT_SYM_KEY_PATH
+                    );
                 } else if (std::strcmp(mode, "asymmetric") == 0) {
-                    cf.policy.enc_p.key_path = std::getenv(PUB_KEY_ENV);
+                    cf.policy.enc_p.key_path = getenv_or_default(
+                        PUB_KEY_ENV, 
+                        DEFAULT_PUB_KEY_PATH
+                    );
                 } else {
                     std::fprintf(
                         stderr,
@@ -270,7 +274,10 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
         cf.policy.enc_p.flags |= ENC_FLAG_ENABLED;
 
         if (strcmp(cf.mode.c_str(), "decrypt") == 0) {
-            cf.policy.enc_p.dec_key_path = std::getenv(PR_KEY_ENV);
+            cf.policy.enc_p.dec_key_path = getenv_or_default(
+                PR_KEY_ENV, 
+                DEFAULT_PR_KEY_PATH
+            );
         }
 
         for (int i = 3; i < argc; ++i) {
@@ -278,10 +285,15 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
 
             if (std::strcmp(arg, "--symmetric") == 0) {
                 cf.policy.enc_p.flags   |= ENC_FLAG_SYMMETRIC;
-                cf.policy.enc_p.key_path = std::getenv(SYM_KEY_ENV);
-
+                cf.policy.enc_p.key_path = getenv_or_default(
+                    SYM_KEY_ENV, 
+                    DEFAULT_SYM_KEY_PATH
+                );
             } else if (std::strcmp(arg, "--asymmetric") == 0) {
-                cf.policy.enc_p.key_path = std::getenv(PUB_KEY_ENV);
+                cf.policy.enc_p.key_path = getenv_or_default(
+                    PUB_KEY_ENV, 
+                    DEFAULT_PUB_KEY_PATH
+                );
 
             } else if (std::strcmp(arg, "--all") == 0) {
                 cf.policy.enc_p.flags |= ENC_FLAG_ALL;
