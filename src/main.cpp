@@ -353,9 +353,7 @@ int main(int argc, char** argv) {
     }
 
     filesend_config_t cf{};
-    if (parse_args(argc, argv, cf) != 0) {
-        return EXIT_FAILURE;
-    }
+    if (parse_args(argc, argv, cf) != 0) return EXIT_FAILURE;
 
     if (sodium_init() < 0) {
         fprintf(
@@ -368,15 +366,6 @@ int main(int argc, char** argv) {
     // SEND MODE
     if (strcmp(cf.mode.c_str(), "send") == 0) {
         curl_global_init(CURL_GLOBAL_DEFAULT);
-
-        if (cf.policy.cert_path.empty()) {
-            fprintf(
-                stderr,
-                RED "[ERROR] CERT_PATH env variable not set\n" RESET
-            );
-            curl_global_cleanup();
-            return EXIT_FAILURE;
-        }
 
         file_db db(cf.init_path); db.load();
 
@@ -416,16 +405,16 @@ int main(int argc, char** argv) {
         sender->send_end();
 
         curl_global_cleanup();
+
         return ok ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     // ENCRYPT / DECRYPT MODES
+
+    bool on_all = (cf.policy.enc_p.flags & ENC_FLAG_ALL);
+
     if (cf.policy.enc_p.flags & ENC_FLAG_SYMMETRIC) {
         unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
-
-        if (cf.policy.enc_p.key_path.empty()) {
-            cf.policy.enc_p.key_path = DEFAULT_SYM_KEY_PATH;
-        }
 
         if (load_or_create_symmetric_key(cf.policy.enc_p.key_path.c_str(), key, sizeof(key)) != 0) {
             fprintf(
@@ -440,22 +429,18 @@ int main(int argc, char** argv) {
                 key, 
                 src.c_str(), 
                 dest.c_str(), 
-                (cf.policy.enc_p.flags & ENC_FLAG_ALL)
+                on_all
             );
         };
 
         return (process_path_encrypt_decrypt(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+
     } else {
-        bool is_decrypt = (std::strcmp(cf.mode.c_str(), "decrypt") == 0);
 
         unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
         unsigned char pr_key [crypto_box_SECRETKEYBYTES];
 
-        if (cf.policy.enc_p.key_path.empty())     cf.policy.enc_p.key_path     = DEFAULT_PUB_KEY_PATH;
-        if (cf.policy.enc_p.dec_key_path.empty()) cf.policy.enc_p.dec_key_path = DEFAULT_PR_KEY_PATH;
-
-        if (!is_decrypt) {
-            // ENCRYPT
+        if (strcmp(cf.mode.c_str(), "decrypt") != 0) { // ENCRYPT
             if (load_or_create_asymmetric_key_pair(
                     cf.policy.enc_p.key_path.c_str(),
                     cf.policy.enc_p.dec_key_path.c_str(),
@@ -468,22 +453,18 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            bool enc_all = (cf.policy.enc_p.flags & ENC_FLAG_ALL);
-
             auto fn = [&](const std::string& src, const std::string& dest) -> int {
                 return encrypt_file_asymmetric(
                     pub_key,
                     src.c_str(),
                     dest.c_str(),
-                    enc_all
+                    on_all
                 );
             };
 
-            int rc = process_path_encrypt_decrypt(cf, fn);
-            return (rc == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (process_path_encrypt_decrypt(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
-        } else {
-            // DECRYPT
+        } else { // DECRYPT
             if (load_key(cf.policy.enc_p.key_path.c_str(), pub_key, sizeof(pub_key))     != 0 ||
                 load_key(cf.policy.enc_p.dec_key_path.c_str(), pr_key,  sizeof(pr_key))  != 0) {
                 std::fprintf(
@@ -493,15 +474,13 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            bool dec_all = (cf.policy.enc_p.flags & ENC_FLAG_ALL);
-
             auto fn = [&](const std::string& src, const std::string& dest) -> int {
                 return decrypt_file_asymmetric(
                     pub_key,
                     pr_key,
                     src.c_str(),
                     dest.c_str(),
-                    dec_all
+                    on_all
                 );
             };
 

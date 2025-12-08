@@ -22,7 +22,7 @@ bool FileSender::send_one_file(const std::string& file_path) {
     }
 
     bool ok = process_one_file(p, nullptr);
-    if (ok) sender_.send_end();    // Optionally send_end for single file
+    if (ok) sender_.send_end();
 
     return ok;
 }
@@ -123,6 +123,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
                    << batch_->format;
         
         std::string compressed_str = compressed.str();
+        
         if (!batch_->compress(compressed_str, batch_->format)) {
             fprintf(
                 stderr,
@@ -134,15 +135,16 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
         if (!process_one_file(compressed_str, nullptr)) {
             fprintf(
                 stderr,
-                RED "[ERROR] Warning: failed to process batch %s\n" RESET, p.c_str()
+                RED "[ERROR] Warning: failed to process batch %s\n" RESET, compressed_str.c_str()
             );
             batch_->clear();
             return false;
         }
 
         fprintf(
-        stdout, 
-        "[INFO] Sending batch: %s (queue size: %zu/%zu)\n", compressed_str.c_str(), batch_->qsize(), batch_->size
+            stdout, 
+            "[INFO] Sending batch: %s (queue size: %zu/%zu)\n", 
+            compressed_str.c_str(), batch_->qsize(), batch_->size
         );
 
         batch_id++;
@@ -189,7 +191,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
     auto last_new = std::chrono::steady_clock::now();
     const auto poll_interval = std::chrono::seconds(1);
 
-    int batch_id = 1;
+    int batch_id = 1; // increases on success, stays on failure (ok?)
 
     while (true) {
         bool new_in_this_round = false;
@@ -239,7 +241,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
                 );
 
                 if (batch_->qsize() > 0) {
-
+                    
                     printf(
                         "[INFO] Timeout reached, sending last batch: %d (queue size: %zu/%zu).\n", 
                         batch_id, batch_->qsize(), batch_->size

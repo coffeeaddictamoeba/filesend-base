@@ -119,7 +119,7 @@ inline bool encrypt_in_place(const send_policy_t& policy, const std::string& fil
         }
     } else {
         const char* pub = key_path ? key_path : DEFAULT_PUB_KEY_PATH;
-        const char* pr  = DEFAULT_SYM_KEY_PATH; // dummy for keypair creation
+        const char* pr  = DEFAULT_PR_KEY_PATH; // dummy for keypair creation
 
         unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
         if (load_or_create_asymmetric_key_pair(pub, pr, pub_key, sizeof(pub_key)) != 0) {

@@ -40,16 +40,16 @@ struct batch_t {
         pending.reserve(size);
     }
 
-    void add(const std::string file_path) {
+    void add(const std::string& file_path) {
         if (ready) return;
 
-        pending.emplace_back(std::move(file_path));
+        pending.push_back(file_path);
         if (size <= 1 || pending.size() >= size) {
             ready = true;
         }
     }
 
-    void remove(const std::string file_path) {
+    void remove(const std::string& file_path) {
         if (pending.empty()) return;
 
         pending.erase(

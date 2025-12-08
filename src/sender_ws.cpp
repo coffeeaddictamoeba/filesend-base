@@ -5,7 +5,7 @@
 WsSender::WsSender(const std::string& device_id, send_policy_t& policy)
     : Sender(policy),
       device_id_(device_id),
-      policy_(policy), // improve later
+      policy_(policy),
       client_(policy_.url, device_id, policy_.cert_path) {}
 
 bool WsSender::is_connected() {
