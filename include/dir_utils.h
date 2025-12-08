@@ -333,3 +333,11 @@ private:
         int& batch_id
     );
 };
+
+int process_dir(
+    const std::string& src_dir, 
+    std::string& dest_base, 
+    const std::string& pattern, 
+    const std::function<int(const std::string& src, const std::string& dest)>& fn
+);
+

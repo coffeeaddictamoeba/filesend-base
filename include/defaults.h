@@ -1,6 +1,8 @@
 #ifndef DEFAULTS_H
 #define DEFAULTS_H
 
+#include <cstddef>
+#include <cstring>
 #include <string>
 
 // Colorful logs.
@@ -32,6 +34,12 @@ constexpr const char* PUB_KEY_ENV   = "PUB_KEY_PATH";
 constexpr const char* PR_KEY_ENV    = "PR_KEY_PATH";
 constexpr const char* SYM_KEY_ENV   = "SYM_KEY_PATH";
 constexpr const char* CERT_PATH_ENV = "CERT_PATH";
+
+constexpr const char* COMPRESSION_FORMATS_AVAILABLE[] = {
+    "zip",
+    "tar",
+    "tar.gz"
+};
 
 inline const char* getenv_or_default(const char* env_name, const char* default_val) {
     const char* env = std::getenv(env_name);

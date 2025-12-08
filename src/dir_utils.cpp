@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <dirent.h>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
@@ -9,6 +10,77 @@
 #include "../include/dir_utils.h"
 
 namespace fs = std::filesystem;
+
+int process_dir(const std::string& src_dir, std::string& dest_base, const std::string& pattern, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
+    bool dest_is_dir = false;
+    struct stat dstst{};
+
+    if (stat(dest_base.c_str(), &dstst) == 0) {
+        dest_is_dir = S_ISDIR(dstst.st_mode);
+    } else {
+        if (mkdir(dest_base.c_str(), 0700) == 0) {
+            dest_is_dir = true;
+        } else {
+            dest_base = src_dir;
+            dest_is_dir = true;
+        }
+    }
+
+    DIR* dir = opendir(src_dir.c_str());
+    if (!dir) {
+        perror("[ERROR] opendir src_dir");
+        return -1;
+    }
+
+    int ret = 0;
+    struct dirent* ent;
+    char path_buf[PATH_MAX];
+
+    while ((ent = readdir(dir)) != nullptr) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+
+        if (!pattern.empty() && !match_pattern(pattern.c_str(), ent->d_name)) {
+            continue;
+        }
+
+        snprintf(
+            path_buf, 
+            sizeof(path_buf), 
+            "%s/%s", src_dir.c_str(), ent->d_name
+        );
+
+        struct stat fst{};
+        if (stat(path_buf, &fst) != 0) {
+            perror("[WARN] stat entry");
+            ret = -1;
+            continue;
+        }
+
+        if (!S_ISREG(fst.st_mode)) continue;
+
+        std::string src = path_buf;
+        std::string dest;
+
+        if (dest_is_dir) {
+            dest = dest_base + "/" + ent->d_name;
+        } else {
+            dest = src;
+        }
+
+        if (fn(src, dest) != 0) {
+            fprintf(
+                stderr, 
+                "[WARN] Failed to process %s\n", src.c_str()
+            );
+            ret = -1;
+        }
+    }
+
+    closedir(dir);
+    return ret;
+}
 
 bool FileSender::send_one_file(const std::string& file_path) {
     fs::path p(file_path);

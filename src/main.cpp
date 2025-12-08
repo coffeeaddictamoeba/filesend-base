@@ -20,28 +20,65 @@
 #include "../include/file_utils.h"
 #include "../include/db_utils.hpp"
 
-int process_path_encrypt_decrypt(const filesend_config_t& cf, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
+int process_path(const filesend_config_t& cf, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
+    std::string init(cf.init_path);
+
+    const bool has_wildcards = init.find_first_of("*?") != std::string::npos;
+
+    std::string dest_base = cf.dest_path.empty() ? init : cf.dest_path;
+
+    if (has_wildcards) {
+        std::string::size_type slash = init.find_last_of('/');
+        std::string src_dir;
+        std::string pattern;
+
+        if (slash == std::string::npos) {
+            src_dir = ".";
+            pattern = init;
+        } else {
+            src_dir = init.substr(0, slash);
+            pattern = init.substr(slash + 1);
+        }
+
+        struct stat st{};
+        if (stat(src_dir.c_str(), &st) != 0) {
+            perror("[ERROR] stat pattern directory");
+            return -1;
+        }
+        if (!S_ISDIR(st.st_mode)) {
+            std::fprintf(
+                stderr,
+                "[ERROR] %s is not a directory\n", src_dir.c_str()
+            );
+            return -1;
+        }
+
+        if (cf.dest_path == cf.init_path) {
+            dest_base = src_dir;
+        }
+
+        return process_dir(src_dir, dest_base, pattern, fn);
+    }
+
     struct stat st{};
-    if (stat(cf.init_path.c_str(), &st) != 0) {
+    if (stat(init.c_str(), &st) != 0) {
         perror("[ERROR] stat init_path");
         return -1;
     }
-
-    std::string init(cf.init_path);
-    std::string dest_base = cf.dest_path.empty() ? cf.init_path: cf.dest_path;
 
     // Single file
     if (S_ISREG(st.st_mode)) {
         std::string src = init;
         std::string dest;
+        std::string base = cf.dest_path.empty() ? cf.init_path : cf.dest_path;
 
         struct stat dstst{};
-        if (stat(dest_base.c_str(), &dstst) == 0 && S_ISDIR(dstst.st_mode)) {
+        if (stat(base.c_str(), &dstst) == 0 && S_ISDIR(dstst.st_mode)) {
             auto pos = src.find_last_of('/');
             std::string fname = (pos == std::string::npos) ? src : src.substr(pos + 1);
-            dest = dest_base + "/" + fname;
+            dest = base + "/" + fname;
         } else {
-            dest = dest_base;
+            dest = base;
         }
 
         return fn(src, dest);
@@ -55,66 +92,8 @@ int process_path_encrypt_decrypt(const filesend_config_t& cf, const std::functio
         return -1;
     }
 
-    // Dir
-    bool dest_is_dir = false;
-    struct stat dstst{};
-    if (stat(dest_base.c_str(), &dstst) == 0) {
-        dest_is_dir = S_ISDIR(dstst.st_mode);
-    } else {
-        if (mkdir(dest_base.c_str(), 0700) == 0) {
-            dest_is_dir = true;
-        } else {
-            dest_base = init;
-            dest_is_dir = true;
-        }
-    }
-
-    DIR* dir = opendir(init.c_str());
-    if (!dir) {
-        perror("[ERROR] opendir init_path");
-        return -1;
-    }
-
-    int ret = 0;
-    struct dirent* ent;
-    char path_buf[PATH_MAX];
-
-    while ((ent = readdir(dir)) != nullptr) {
-        if (std::strcmp(ent->d_name, ".") == 0 || std::strcmp(ent->d_name, "..") == 0) {
-            continue;
-        }
-
-        snprintf(path_buf, sizeof(path_buf), "%s/%s", init.c_str(), ent->d_name);
-
-        struct stat fst{};
-        if (stat(path_buf, &fst) != 0) {
-            perror("[WARN] stat entry");
-            ret = -1;
-            continue;
-        }
-
-        if (!S_ISREG(fst.st_mode)) continue;
-
-        std::string src  = path_buf;
-        std::string dest;
-
-        if (dest_is_dir) {
-            dest = dest_base + "/" + ent->d_name;
-        } else {
-            dest = src;
-        }
-
-        if (fn(src, dest) != 0) {
-            fprintf(
-                stderr,
-                "[WARN] Failed to process %s\n", src.c_str()
-            );
-            ret = -1;
-        }
-    }
-
-    closedir(dir);
-    return ret;
+    const std::string pattern = "";
+    return process_dir(init, dest_base, pattern, fn);
 }
 
 void usage(const char* prog) {
@@ -140,16 +119,12 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
 
     cf = {};
 
-    cf.mode       = argv[1];
-    cf.device_id  = "pi";
-    cf.batch_size = 1;
-
-    cf.policy.retry_connect.max_attempts = DEFAULT_RETRIES;
-    cf.policy.retry_send.max_attempts    = DEFAULT_RETRIES;
+    cf.mode           = argv[1];
+    cf.device_id      = "pi";
+    cf.batch_size     = 1;
     cf.policy.timeout = std::chrono::seconds(0);
 
     if (std::strcmp(cf.mode.c_str(), "send") == 0) {
-
         if (argc < 5) {
             std::fprintf(
                 stderr,
@@ -215,7 +190,7 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
                 cf.policy.enc_p.flags |= ENC_FLAG_ALL;
 
             } else if (std::strcmp(arg, "--batch") == 0) {
-                if (i + 2 >= argc) {
+                if (i + 1 >= argc) {
                     std::fprintf(
                         stderr,
                         RED "[ERROR] --batch requires integer size and compression format\n" RESET
@@ -224,7 +199,18 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
                 }
                 
                 cf.batch_size = std::max((int)cf.batch_size, std::atoi(argv[++i]));
-                cf.batch_format = argv[++i];
+
+                if (i + 1 < argc) {
+                    char* next_arg = argv[i+1];
+                    for (const auto& format : COMPRESSION_FORMATS_AVAILABLE) {
+                        if (strcmp(format, next_arg) == 0) {
+                            cf.batch_format = next_arg;
+                            break;
+                        }
+                    }
+                }
+
+                if (cf.batch_format.empty()) cf.batch_format = DEFAULT_COMPRESSION_FORMAT;
 
             } else if (std::strcmp(arg, "--timeout") == 0) {
                 if (i + 1 >= argc) {
@@ -270,7 +256,6 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
 
     } else if (std::strcmp(cf.mode.c_str(), "encrypt") == 0 || std::strcmp(cf.mode.c_str(), "decrypt") == 0) {
         cf.init_path = argv[2];
-        
         cf.policy.enc_p.flags |= ENC_FLAG_ENABLED;
 
         if (strcmp(cf.mode.c_str(), "decrypt") == 0) {
@@ -433,7 +418,7 @@ int main(int argc, char** argv) {
             );
         };
 
-        return (process_path_encrypt_decrypt(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+        return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
     } else {
 
@@ -462,7 +447,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (process_path_encrypt_decrypt(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
         } else { // DECRYPT
             if (load_key(cf.policy.enc_p.key_path.c_str(), pub_key, sizeof(pub_key))     != 0 ||
@@ -484,7 +469,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (process_path_encrypt_decrypt(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
     }
 

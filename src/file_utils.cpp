@@ -19,6 +19,43 @@ int make_readonly(const char *path) {
     return 0;
 }
 
+int match_pattern(const char* p, const char* text) {
+    size_t p_idx     = 0;
+    size_t t_idx     = 0;
+    size_t match_pos = 0; // position in text when last '*' was seen
+    size_t star_pos  = -1;      // last position of '*' in pattern
+
+    size_t p_len = strlen(p);
+
+    while (t_idx < strlen(text)) {
+        // Case 1: '*': record its position and move on in pattern
+        if (p_idx < p_len && p[p_idx] == '*') {
+            star_pos = p_idx++;
+            match_pos = t_idx;
+        }
+
+        // Case 2: char match or '?'
+        else if (p_idx < p_len && (p[p_idx] == '?' || p[p_idx] == text[t_idx])) {
+            ++p_idx;
+            ++t_idx;
+        }
+
+        // Case 3: last pattern char was '*'
+        else if (star_pos > 0) {
+            p_idx = star_pos + 1;
+            ++match_pos;
+            t_idx = match_pos;
+        }
+
+        // Case 4: no match
+        else return false;
+    }
+
+    while (p_idx < p_len && p[p_idx] == '*') ++p;
+
+    return p_idx == p_len;
+}
+
 int get_file_metadata(const char* path, file_metadata_t* fmd) {
     struct stat st;
     if (stat(path, &st) != 0) {

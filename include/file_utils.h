@@ -26,6 +26,11 @@ typedef struct {
 
 int make_readonly(const char *path);
 
+int match_pattern(
+    const char* p, 
+    const char* text
+);
+
 // Integrity check
 int compute_file_sha256(const char *path, unsigned char out[crypto_hash_sha256_BYTES]);
 int compute_file_sha256_hex(const char *path, char *hex_out, size_t hex_out_len);
