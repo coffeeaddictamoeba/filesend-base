@@ -106,8 +106,9 @@ void usage(const char* prog) {
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
         "[--dest <file>] [--timeout <n>]\n"
         "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>]\n",
-        prog, prog, prog
+        "[--dest <file>] [--timeout <n>]\n"
+        "  %s verify <path> <sha256>\n",
+        prog, prog, prog, prog
     );
 }
 
@@ -318,6 +319,10 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
         }
 
         if (cf.dest_path.empty()) { cf.dest_path = cf.init_path; }
+    
+    } else if (std::strcmp(cf.mode.c_str(), "verify") == 0) {
+        cf.init_path = argv[2];
+        return 0;
 
     } else {
         std::fprintf(
@@ -356,6 +361,7 @@ int main(int argc, char** argv) {
 
         // Transport
         std::unique_ptr<Sender> sender;
+        std::unique_ptr<batch_t> batch;
 
         if (cf.use_ws) {
             sender = std::make_unique<WsSender>(
@@ -372,10 +378,10 @@ int main(int argc, char** argv) {
 
         std::unique_ptr<FileSender> s;
         if (cf.batch_size > 1) {
-            batch_t batch(cf.batch_size, cf.batch_format);
+            batch = std::make_unique<batch_t>(cf.batch_size, cf.batch_format);
             s = std::make_unique<FileSender>(
                 *sender, 
-                batch, 
+                batch.get(),
                 &db
             );
         } else {
@@ -392,10 +398,39 @@ int main(int argc, char** argv) {
         curl_global_cleanup();
 
         return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    } else if (strcmp(cf.mode.c_str(), "verify") == 0) {
+        const char* sha_received = argv[3];
+
+        printf("[INFO] Checksum received: %s\n", sha_received);
+
+        char sha_actual[crypto_hash_sha256_BYTES*2+1];
+        if (compute_file_sha256_hex(cf.init_path.c_str(), sha_actual, sizeof(sha_actual)) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to compute checksum of %s\n" RESET, cf.init_path.c_str() 
+            );
+            return -1;
+        }
+
+        printf("[INFO] Checksum computed: %s\n", sha_actual);
+
+        if (sodium_memcmp(sha_received, sha_actual, crypto_hash_sha256_BYTES*2+1) == 0) {
+            fprintf(
+                stdout,
+                GREEN "[SUCCESS] Checksum match: %s\n" RESET, cf.init_path.c_str() 
+            );
+            return EXIT_SUCCESS;
+        }
+
+        fprintf(
+            stderr,
+            RED "[ERROR] Checksum does not match: %s\n" RESET, cf.init_path.c_str() 
+        );
+
+        return EXIT_FAILURE;
     }
 
     // ENCRYPT / DECRYPT MODES
-
     bool on_all = (cf.policy.enc_p.flags & ENC_FLAG_ALL);
 
     if (cf.policy.enc_p.flags & ENC_FLAG_SYMMETRIC) {

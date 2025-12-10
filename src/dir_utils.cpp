@@ -151,7 +151,7 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
     return true;
 }
 
-bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::string>* processed, int& batch_id) {
+bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::string>* processed) {
     const std::string name = p.filename().string();
 
     if (!batch_->ready) {
@@ -166,7 +166,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
 
         if (processed->count(name)) return true;
 
-        batch_->add(p);
+        batch_->add(p.string());
 
         processed->insert(name);
 
@@ -181,7 +181,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
 
         fprintf(
             stdout, 
-            "[INFO] Batch: adding file %s (queue size: %zu)\n", p.c_str(), batch_->qsize()
+            "[INFO] Batch N%d: adding file %s (queue size: %zu)\n", batch_->get_id(), p.c_str(), batch_->qsize()
         );
     } 
     
@@ -190,7 +190,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
 
         std::ostringstream compressed;
         compressed << "batch_" 
-                   << std::setw(3) << std::setfill('0') << batch_id << "_" 
+                   << std::setw(3) << std::setfill('0') << batch_->get_id() << "_" 
                    << std::put_time(std::localtime(&now), DEFAULT_DATE_FORMAT) << "." 
                    << batch_->format;
         
@@ -202,6 +202,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
                 RED "[ERROR] Compression failed in batch %s\n" RESET, compressed_str.c_str()
             );
             batch_->clear();
+            return false;
         }
 
         if (!process_one_file(compressed_str, nullptr)) {
@@ -219,7 +220,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
             compressed_str.c_str(), batch_->qsize(), batch_->size
         );
 
-        batch_id++;
+        batch_->set_id(batch_->get_id()+1);
         batch_->clear();
     }
     
@@ -261,9 +262,7 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
 
     std::unordered_set<std::string> processed;
     auto last_new = std::chrono::steady_clock::now();
-    const auto poll_interval = std::chrono::seconds(1);
-
-    int batch_id = 1; // increases on success, stays on failure (ok?)
+    const auto poll_interval = std::chrono::seconds(1);// increases on success, stays on failure (ok?)
 
     while (true) {
         bool new_in_this_round = false;
@@ -276,11 +275,11 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
 
             if (processed.count(name)) continue;
 
-            if (batch_->size > 1) {
-                if (!process_one_batch(p, &processed, batch_id)) {
+            if (batch_ && batch_->size > 1) {
+                if (!process_one_batch(p, &processed)) {
                     fprintf(
                         stderr,
-                        RED "[ERROR] Warning: failed to process batch %d\n" RESET, batch_id
+                        RED "[ERROR] Warning: failed to process batch %d\n" RESET, batch_->get_id()
                     );
                     continue;
                 }
@@ -312,21 +311,21 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
                     YELLOW "[INFO] No new files for %lld seconds, stopping.\n" RESET, (long long)timeout.count()
                 );
 
-                if (batch_->qsize() > 0) {
+                if (batch_ && batch_->qsize() > 0) {
                     
                     printf(
                         "[INFO] Timeout reached, sending last batch: %d (queue size: %zu/%zu).\n", 
-                        batch_id, batch_->qsize(), batch_->size
+                        batch_->get_id(), batch_->qsize(), batch_->size
                     );
 
                     batch_->ready = true;
 
                     fs::path dummy;
-                    if (!process_one_batch(dummy, &processed, batch_id)) {
+                    if (!process_one_batch(dummy, &processed)) {
                         fprintf(
                             stderr,
                             RED "[ERROR] Warning: failed to process last batch %d (queue size: %zu/%zu)\n" RESET, 
-                            batch_id, batch_->qsize(), batch_->size
+                            batch_->get_id(), batch_->qsize(), batch_->size
                         );
                     }
                 }

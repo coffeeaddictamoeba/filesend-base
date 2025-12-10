@@ -67,6 +67,15 @@ async def handle_client(ws):
                         except (TypeError, ValueError):
                             current_flags = 0
 
+                        sha = data.get("SHA256", "")
+
+                        if sha == "":
+                            await ws.send(json.dumps({
+                                "type": "error",
+                                "msg": "no checksum"
+                            }))
+                            continue
+
                         if not filename:
                             await ws.send(json.dumps({
                                 "type": "error",
@@ -112,6 +121,22 @@ async def handle_client(ws):
                         enc_all       = bool(current_flags & 0b100)
 
                         try:
+                            if sha is not None:
+                                try:
+                                    cmd = [
+                                        "bin/./filesend",
+                                        "verify",
+                                        current_enc_path,
+                                        sha
+                                    ]
+                                    subprocess.check_call(cmd)
+                                except subprocess.CalledProcessError as e:
+                                    log(f"[WS] CHECKSUM MISMATCH for {dec_path}")
+                                    failed_files.append(current_enc_path)
+                                    await ws.send(json.dumps({
+                                        "type": "error",
+                                        "msg": "checksum mismatch"
+                                    }))
                             if not enc_enabled:
                                 # no encryption on this file: just copy it as "decrypted"
                                 shutil.copy2(current_enc_path, dec_path)

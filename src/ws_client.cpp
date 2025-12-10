@@ -1,9 +1,11 @@
 #include <fstream>
 #include <cstdio>
+#include <sodium/crypto_hash_sha256.h>
 #include <string>
 
 #include "../include/defaults.h"
 #include "../include/ws_client.hpp"
+#include "../include/file_utils.h"
 
 WsClient::WsClient(const std::string& url, const std::string& device_id, const std::string& ca_cert)
     : url_(url),
@@ -141,9 +143,21 @@ int WsClient::send_file(const std::string& file_path, int max_attempts, uint32_t
     auto pos = file_path.find_last_of('/');
     filename = (pos == std::string::npos) ? file_path : file_path.substr(pos + 1);
 
+    char sha256[crypto_hash_sha256_BYTES*2+1];
+    if (compute_file_sha256_hex(file_path.c_str(), sha256, sizeof(sha256)) != 0) {
+        fprintf(
+            stderr, 
+            RED "[ERROR] Failed to compute checksum of %s\n" RESET, file_path.c_str()
+        );
+        return -1;
+    }
+
     std::string header_json =
-        std::string("{\"type\":\"file\",\"filename\":\"") +
-        filename + "\",\"device_id\":\"" + device_id_ + "\",\"flags\":\"" + std::to_string(flags) + "\"}";
+        std::string("{\"type\":\"file\",\"filename\":\"") + filename 
+            + "\",\"device_id\":\"" + device_id_ 
+            + "\",\"flags\":\"" + std::to_string(flags) 
+            + "\",\"SHA256\":\"" + sha256
+            + "\"}";
 
     try {
         auto send_text = [&](const std::string& s) {

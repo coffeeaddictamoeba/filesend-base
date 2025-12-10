@@ -46,6 +46,20 @@ bool HttpsSender::_send_file(const std::string& file_path) {
     curl_mime_name(fl, "flags");
     curl_mime_data(fl, buf, CURL_ZERO_TERMINATED);
 
+    // checksum
+    char sha256[crypto_hash_sha256_BYTES*2+1];
+    if (compute_file_sha256_hex(file_path.c_str(), sha256, sizeof(sha256)) != 0 ) {
+        fprintf(
+            stderr,
+            RED "[ERROR] Failed to compute checksum of %s\n" RESET, file_path.c_str()
+        );
+        return false;
+    }
+
+    curl_mimepart* sha = curl_mime_addpart(mime);
+    curl_mime_name(sha, "SHA256");
+    curl_mime_data(sha, sha256, CURL_ZERO_TERMINATED);
+
     curl_easy_setopt(curl_, CURLOPT_URL, policy_.url.c_str());
     curl_easy_setopt(curl_, CURLOPT_MIMEPOST, mime);
 

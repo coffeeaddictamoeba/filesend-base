@@ -37,6 +37,10 @@ def upload():
         # If neither file nor end -> it's a malformed request
         return "no file field and no end signal\n", 400
 
+    sha_str = request.form.get("SHA256")
+    if sha_str is None:
+        return f"no checksum for file {f.filename} provided\n", 400
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     enc_name = f"{device_id}_{timestamp}_{f.filename}"
     enc_path = os.path.join(INCOMING_DIR, enc_name)
@@ -59,6 +63,18 @@ def upload():
     enc_enabled   = bool(flags & 0b001)
     enc_symmetric = bool(flags & 0b010)
     enc_all       = bool(flags & 0b100)
+
+    try:
+        cmd = [
+            "bin/./filesend",
+            "verify",
+            enc_path,
+            sha
+        ]
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        print(f"[SERVER] Checksum verification failed: {e}")
+        return "checksum verification failed\n", 500
 
     # No encryption – just copy the received file to dec_path
     if not enc_enabled:

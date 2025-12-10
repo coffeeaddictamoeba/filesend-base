@@ -11,6 +11,7 @@
 #include <linux/limits.h>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_set>
 #include <vector>
@@ -34,22 +35,24 @@ struct batch_t {
 
     explicit batch_t(std::size_t batch_size) : size(batch_size) {
         pending.reserve(size);
+        id = 1;
     }
 
     explicit batch_t(std::size_t batch_size, std::string& batch_format) : size(batch_size), format(batch_format) {
         pending.reserve(size);
+        id = 1;
     }
 
-    void add(const std::string& file_path) {
+    void add(std::string_view file_path) {
         if (ready) return;
 
-        pending.push_back(file_path);
+        pending.emplace_back(file_path);
         if (size <= 1 || pending.size() >= size) {
             ready = true;
         }
     }
 
-    void remove(const std::string& file_path) {
+    void remove(std::string_view file_path) {
         if (pending.empty()) return;
 
         pending.erase(
@@ -66,14 +69,17 @@ struct batch_t {
         ready = false;
     }
 
-    size_t qsize() { return pending.size(); }
+    size_t qsize() const { return pending.size(); }
 
-    bool compress(const std::string& out_path, const std::string& format) {
+    int get_id() const { return id; }
+    void set_id(int new_id) { id = new_id; }
+
+    bool compress(const std::string& out_path, std::string_view format) const {
         if (pending.empty()) return false;
 
         fprintf(
             stdout, 
-            "[INFO] Batch: compressing %zu files into %s (%s)\n", pending.size(), out_path.c_str(), format.c_str()
+            "[INFO] Batch: compressing %zu files into %s (%s)\n", pending.size(), out_path.c_str(), format.data()
         );
 
         std::filesystem::path out(out_path);
@@ -91,13 +97,13 @@ struct batch_t {
         }
 
         if (format == "tar" || format == "tar.gz") {
-            return _compress_tar(out_path, (strcmp(format.c_str(), "tar.gz") == 0));
+            return _compress_tar(out_path, (strcmp(format.data(), "tar.gz") == 0));
         } else if (format == "zip") {
             return _compress_zip(out_path);
         } else {
             fprintf(
                 stderr, 
-                RED "[ERROR] Batch: unsupported format: %s\n" RESET, format.c_str()
+                RED "[ERROR] Batch: unsupported format: %s\n" RESET, format.data()
             );
             return false;
         }
@@ -105,8 +111,9 @@ struct batch_t {
 
 private:
     std::vector<std::string> pending;
+    int id = 1;
 
-    bool _compress_tar(const std::string& out_path, bool gzipped) {
+    bool _compress_tar(const std::string& out_path, bool gzipped) const {
         struct archive *a = archive_write_new();
         if (!a) {
             fprintf(
@@ -301,9 +308,11 @@ private:
 
 class FileSender {
 public:
-    FileSender(Sender& s, file_db* db = nullptr) : sender_(s), db_(db) {}
+    FileSender(Sender& s, file_db* db = nullptr) : sender_(s), db_(db) {
+        batch_ = nullptr; 
+    }
 
-    FileSender(Sender& s, batch_t& batch, file_db* db = nullptr) : sender_(s), db_(db), batch_(batch) {}
+    FileSender(Sender& s, batch_t* batch, file_db* db = nullptr) : sender_(s), db_(db), batch_(batch) {}
 
     // Send a single file (encrypt + send + no end)
     bool send_one_file(const std::string& file_path);
@@ -320,17 +329,16 @@ public:
 private:
     Sender& sender_;
     file_db* db_;
-    std::optional<batch_t> batch_;
+    batch_t* batch_;
 
     bool process_one_file(
-        const std::filesystem::path& p,
+        const fs::path& p,
         std::unordered_set<std::string>* processed
     );
 
     bool process_one_batch(
         const fs::path& p, 
-        std::unordered_set<std::string>* processed,
-        int& batch_id
+        std::unordered_set<std::string>* processed
     );
 };
 

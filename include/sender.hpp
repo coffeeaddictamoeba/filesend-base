@@ -91,7 +91,7 @@ inline bool encrypt_in_place(const send_policy_t& policy, const std::string& fil
     if (!(policy.enc_p.flags & ENC_FLAG_ENABLED)) {
         fprintf(
             stderr, 
-            "[DEBUG] No encryption policy provided. Sending plain file.\n"
+            "[INFO] No encryption policy provided. Sending plain file.\n"
         );
         return true;
     }
