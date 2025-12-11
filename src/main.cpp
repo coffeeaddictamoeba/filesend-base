@@ -404,7 +404,7 @@ int main(int argc, char** argv) {
             cf.init_path.c_str(), 
             sha_received,
             strlen(sha_received)
-        ) ? EXIT_SUCCESS : EXIT_FAILURE;
+        ) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     // ENCRYPT / DECRYPT MODES
