@@ -1,8 +1,9 @@
-#include <filesystem>
+#include <cstdint>
 #include <fstream>
-#include <sstream>
-#include <limits>
+#include <istream>
+#include <ostream>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <linux/limits.h>
@@ -10,22 +11,22 @@
 #include <cstdio>
 
 #include "../include/defaults.h"
-#include "../include/file_utils.h"
 #include "../include/db_utils.hpp"
 
-namespace fs = std::filesystem;
+static std::string dirname_of(std::string_view path) {
+    if (path.empty()) return ".";
+    size_t pos = path.find_last_of('/');
+    if (pos == std::string::npos) return ".";
 
-std::string dirname_of(const std::string& path) {
-    fs::path p(path);
-    if (fs::is_directory(p)) return fs::canonical(p).string();
-    auto parent = p.parent_path();
-    if (parent.empty()) parent = ".";
-    return fs::canonical(parent).string();
+    if (pos == 0) return "/";
+
+    return std::string(path.substr(0, pos));
 }
 
 file_db::file_db(const std::string& db_path) {
-    std::string base_dir = dirname_of(db_path);
-    db_path_ = (fs::path(base_dir) / DB_NAME).string();
+    db_path_ = dirname_of(db_path);
+    db_path_ += '/' ;
+    db_path_ += DB_NAME;
 
     fprintf(
         stderr,
@@ -33,135 +34,124 @@ file_db::file_db(const std::string& db_path) {
     );
 }
 
-int file_db::find_file(const std::string& file_path) const {
-    auto it = idx_by_path_.find(file_path);
-    if (it == idx_by_path_.end()) return -1;
-    return static_cast<int>(it->second);
+bool file_db::serialize(std::ostream& out, const db_entry_t& e) const {
+    uint32_t len = e.file_path.size();
+    out.write((char*)&len, 4);
+    out.write(e.file_path.data(), len);
+    out.write((char*)&e.mtime, 8);
+    out.write((char*)&e.size, 8);
+    uint8_t ok = e.sent ? 1 : 0;
+    out.write((char*)&ok, 1);
+    return out.good();
 }
 
-bool file_db::stat_file(const std::string& file_path, std::time_t& mtime, std::uint64_t& size) const {
-    struct stat st{};
-    if (stat(file_path.c_str(), &st) != 0) {
+bool file_db::deserialize(std::istream& in, db_entry_t& e) {
+    uint32_t len;
+    if (!in.read((char*)&len, 4)) return false;
+
+    e.file_path.resize(len);
+    if (!in.read(e.file_path.data(), len)) return false;
+
+    if (!in.read((char*)&e.mtime, 8)) return false;
+    if (!in.read((char*)&e.size, 8)) return false;
+
+    uint8_t ok;
+    if (!in.read((char*)&ok, 1)) return false;
+    e.sent = ok != 0;
+
+    return true;
+}
+
+ bool file_db::stat_file(const std::string& file_path, uint64_t& mtime, uint64_t& size) {
+    struct stat st;
+    if (::stat(file_path.c_str(), &st) != 0) {
         return false;
     }
-    mtime = st.st_mtime;
+    mtime = static_cast<std::uint64_t>(st.st_mtime);
     size  = static_cast<std::uint64_t>(st.st_size);
     return true;
 }
 
 bool file_db::load() {
-    std::ifstream in(db_path_);
+    entries_.clear();
+    idx_by_path_.clear();
+    entries_.reserve(DB_INIT_SIZE);
+
+    std::ifstream in(db_path_, std::ios::binary);
     if (!in.is_open()) {
         return true;
     }
 
-    entries_.clear();
-    entries_.reserve(DB_INIT_SIZE);
-
-    idx_by_path_.clear();
-
-    std::string line;
-    while (std::getline(in, line)) {
-        if (line.empty()) continue;
-
-        std::istringstream iss(line);
-        std::string path, mtime_str, size_str, ok_str, sha_str;
-
-        if (!std::getline(iss, path, '|')) continue;
-        if (!std::getline(iss, mtime_str, '|')) continue;
-        if (!std::getline(iss, size_str, '|')) continue;
-        if (!std::getline(iss, ok_str, '|')) continue;
-        if (!std::getline(iss, sha_str, '|')) {
-            sha_str.clear();
-        }
-
-        db_entry_t e;
-        e.file_path = path;
-        e.mtime     = static_cast<std::time_t>(std::stol(mtime_str));
-        e.size      = static_cast<std::uint64_t>(std::stoll(size_str));
-        e.sent_ok   = (std::stoi(ok_str) != 0);
-        e.sha_hex   = sha_str;
-
-        std::size_t idx = entries_.size();
+    db_entry_t e;
+    while(deserialize(in, e)) {
+        idx_by_path_[e.file_path] = entries_.size();
         entries_.push_back(std::move(e));
-        idx_by_path_[entries_.back().file_path] = idx;
     }
 
     return true;
 }
 
 bool file_db::save() const {
-    std::ofstream out(db_path_, std::ios::trunc);
+    std::ofstream out(db_path_, std::ios::binary | std::ios::trunc);
     if (!out.is_open()) {
         std::perror("[ERROR] fopen save");
         return false;
     }
 
     for (const auto& e : entries_) {
-        if (!e.sent_ok || e.file_path.empty()) continue;
-        out << e.file_path << '|'
-            << static_cast<long>(e.mtime) << '|'
-            << static_cast<long long>(e.size) << '|'
-            << (e.sent_ok ? 1 : 0) << '|'
-            //<< (e.sha_hex.empty() ? "" : e.sha_hex)
-            << '\n';
+        if (!serialize(out, e)) return false;
     }
 
     return true;
 }
 
 bool file_db::is_sent(const std::string& file_path) const {
-    std::time_t mtime{};
-    std::uint64_t size{};
+    auto it = idx_by_path_.find(file_path);
+    if (it == idx_by_path_.end()) {
+        return false;
+    }
+
+    const db_entry_t& e = entries_[it->second];
+
+    if (!e.sent) return false;
+
+    uint64_t mtime, size;
     if (!stat_file(file_path, mtime, size)) {
+        fprintf(
+            stderr, 
+            RED "[ERROR] DB: stat_file %s in is_sent\n", file_path.data()
+        );
         return false;
     }
 
-    int idx = find_file(file_path);
-    if (idx < 0) return false;
-
-    const auto& e = entries_[idx];
-    if (!e.sent_ok) return false;
-
-    if (e.mtime != mtime || e.size != size) {
-        return false;
-    }
-
-    return true;
+    return (e.mtime == mtime) && (e.size == size);
 }
 
 bool file_db::insert(const std::string& file_path) {
-    std::time_t mtime{};
-    std::uint64_t size{};
+    uint64_t mtime, size;
     if (!stat_file(file_path, mtime, size)) {
-        std::perror("[ERROR] stat in insert");
+        fprintf(
+            stderr, 
+            RED "[ERROR] DB: stat_file %s in insert\n", file_path.data()
+        );
         return false;
     }
 
-    // char sha[crypto_hash_sha256_BYTES * 2 + 1];
-    // if (compute_file_sha256_hex(file_path.c_str(), sha, sizeof(sha)) != 0) {
-    //     fprintf(
-    //         stderr, 
-    //         "[DB] Failed to compute SHA for %s\n", file_path.c_str()
-    //     );
-    //     return false;
-    // }
-
-    int idx = find_file(file_path);
-    if (idx < 0) {
+    auto it = idx_by_path_.find(file_path);
+    if (it == idx_by_path_.end()) {
         db_entry_t e;
-        e.file_path  = file_path;
-        e.mtime      = mtime;
-        e.size       = size;
-        e.sent_ok    = true;
-        //e.sha_hex    = std::move(sha);
+        e.file_path = file_path;
+        e.mtime = mtime;
+        e.size = size;
+        e.sent = true;
+
+        idx_by_path_[file_path] = entries_.size();
         entries_.push_back(std::move(e));
     } else {
-        auto& e = entries_[idx];
-        e.mtime   = mtime;
-        e.size    = size;
-        e.sent_ok = true;
-        //e.sha_hex = std::move(sha);
+        db_entry_t& e = entries_[it->second];
+        e.mtime = mtime;
+        e.size = size;
+        e.sent = true;
     }
 
     return save();
@@ -171,7 +161,7 @@ bool file_db::clear() {
     entries_.clear();
     idx_by_path_.clear();
 
-    std::ofstream out(db_path_, std::ios::trunc);
+    std::ofstream out(db_path_, std::ios::binary | std::ios::trunc);
     if (!out.is_open()) {
         std::perror("[DB] clean: failed to truncate DB file");
         return false;

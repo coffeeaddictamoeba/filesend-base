@@ -1,6 +1,10 @@
 #pragma once
 
+#include <cstddef>
+#include <istream>
+#include <ostream>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <cstdint>
 #include <ctime>
@@ -10,10 +14,9 @@
 
 struct db_entry_t {
     std::string file_path;
-    std::string sha_hex;
-    std::time_t mtime{};
-    std::uint64_t size{};
-    bool sent_ok{false};
+    uint64_t mtime;
+    uint64_t size;
+    bool sent;
 };
 
 class file_db {
@@ -21,12 +24,12 @@ public:
     explicit file_db(const std::string& db_path);
 
     bool load();
+    bool clear();
     bool save() const;
 
     bool is_sent(const std::string& file_path) const;
-    bool insert(const std::string& file_path);
 
-    bool clear();
+    bool insert(const std::string& file_path);
     bool remove(const std::string& file_path);
 
     const std::string& db_path() const { return db_path_; }
@@ -34,13 +37,14 @@ public:
 private:
     std::string db_path_;
     std::vector<db_entry_t> entries_;
-    std::unordered_map<std::string, std::size_t> idx_by_path_;
+    std::unordered_map<std::string, size_t> idx_by_path_;
 
-    int find_file(const std::string& file_path) const;
+    bool serialize(std::ostream& out, const db_entry_t& e) const; // write a record
+    bool deserialize(std::istream& in, db_entry_t& e);            // read a record
 
-    bool stat_file(
+    static bool stat_file(
         const std::string& file_path,
-        std::time_t& mtime,
-        std::uint64_t& size
-    ) const;
+        uint64_t& mtime,
+        uint64_t& size
+    );
 };
