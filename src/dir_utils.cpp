@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 
 #include "../include/dir_utils.h"
 
@@ -160,15 +161,15 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
                 stdout,
                 "[INFO] Skipping already sent file inside batch (DB): %s\n", p.c_str()
             );
-            processed->insert(name);
+            if (processed) processed->insert(name);
             return true;
         }
 
-        if (processed->count(name)) return true;
+        if (processed && processed->count(name)) return true;
 
         batch_->add(p.string());
 
-        processed->insert(name);
+        if (processed) processed->insert(name);
 
         if (db_) {
             if (!db_->insert(p.string())) {

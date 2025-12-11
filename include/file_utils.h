@@ -1,6 +1,7 @@
 #ifndef FILE_UTILS_H
 #define FILE_UTILS_H
 
+#include <cstddef>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -65,9 +66,10 @@ int decrypt_file_asymmetric(
     int dec_all
 );
 
-int exec_on_file(
+int verify_file_checksum(
     const char* file_path,
-    const char* exec_s
+    const char* sha,
+    size_t sha_len
 );
 
 #endif // FILE_UTILS_H

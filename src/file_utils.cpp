@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -131,6 +132,51 @@ int compute_file_sha256_hex(const char *path, char *hex_out, size_t hex_out_len)
 
     sodium_bin2hex(hex_out, hex_out_len, digest, crypto_hash_sha256_BYTES);
     return 0;
+}
+
+int verify_file_checksum(const char* file_path, const char* sha, size_t sha_len) {
+    if (sha_len == crypto_hash_sha256_BYTES*2+1) {
+        char sha_actual[crypto_hash_sha256_BYTES*2+1];
+        if (compute_file_sha256_hex(file_path, sha_actual, sizeof(sha_actual)) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to compute hex checksum of %s\n" RESET, file_path 
+            );
+            return -1;
+        }
+
+        if (sodium_memcmp(sha, sha_actual, crypto_hash_sha256_BYTES*2+1) == 0) {
+            fprintf(
+                stdout,
+                GREEN "[SUCCESS] Checksum match: %s\n" RESET, file_path 
+            );
+            return EXIT_SUCCESS;
+        }
+    } else if (sha_len == crypto_hash_sha256_BYTES) {
+        unsigned char sha_actual[crypto_hash_sha256_BYTES];
+        if (compute_file_sha256(file_path, sha_actual) != 0) {
+            fprintf(
+                stderr,
+                RED "[ERROR] Failed to compute raw checksum of %s\n" RESET, file_path 
+            );
+            return -1;
+        }
+
+        if (sodium_memcmp(sha, sha_actual, crypto_hash_sha256_BYTES) == 0) {
+            fprintf(
+                stdout,
+                GREEN "[SUCCESS] Checksum match: %s\n" RESET, file_path 
+            );
+            return EXIT_SUCCESS;
+        }
+    }
+    
+    fprintf(
+        stderr,
+        RED "[ERROR] Checksum does not match: %s (%zu)\n" RESET, file_path, sha_len
+    );
+    
+    return false;
 }
 
 int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, const char* enc_path, int enc_all) {

@@ -392,70 +392,70 @@ int main(int argc, char** argv) {
         }
         
         bool ok = s->send_files_from_path(cf.init_path);
-
         sender->send_end();
 
         curl_global_cleanup();
 
         return ok ? EXIT_SUCCESS : EXIT_FAILURE;
-    } else if (strcmp(cf.mode.c_str(), "verify") == 0) {
+
+    } else if (strcmp(cf.mode.c_str(), "verify") == 0) { // supports raw (32-bit) and hex (64-bit) SHA256; this code uses the latter as default
         const char* sha_received = argv[3];
-
-        printf("[INFO] Checksum received: %s\n", sha_received);
-
-        char sha_actual[crypto_hash_sha256_BYTES*2+1];
-        if (compute_file_sha256_hex(cf.init_path.c_str(), sha_actual, sizeof(sha_actual)) != 0) {
-            fprintf(
-                stderr,
-                RED "[ERROR] Failed to compute checksum of %s\n" RESET, cf.init_path.c_str() 
-            );
-            return -1;
-        }
-
-        printf("[INFO] Checksum computed: %s\n", sha_actual);
-
-        if (sodium_memcmp(sha_received, sha_actual, crypto_hash_sha256_BYTES*2+1) == 0) {
-            fprintf(
-                stdout,
-                GREEN "[SUCCESS] Checksum match: %s\n" RESET, cf.init_path.c_str() 
-            );
-            return EXIT_SUCCESS;
-        }
-
-        fprintf(
-            stderr,
-            RED "[ERROR] Checksum does not match: %s\n" RESET, cf.init_path.c_str() 
-        );
-
-        return EXIT_FAILURE;
+        return verify_file_checksum(
+            cf.init_path.c_str(), 
+            sha_received,
+            strlen(sha_received)
+        ) ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     // ENCRYPT / DECRYPT MODES
     bool on_all = (cf.policy.enc_p.flags & ENC_FLAG_ALL);
 
-    if (cf.policy.enc_p.flags & ENC_FLAG_SYMMETRIC) {
+    if (cf.policy.enc_p.flags & ENC_FLAG_SYMMETRIC) { // SYMMETRIC
         unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
 
-        if (load_or_create_symmetric_key(cf.policy.enc_p.key_path.c_str(), key, sizeof(key)) != 0) {
-            fprintf(
-                stderr,
-                RED "[ERROR] Failed to create/load symmetric key\n" RESET
-            );
-            return EXIT_FAILURE;
+        if (strcmp(cf.mode.c_str(), "decrypt") != 0) { // ENCRYPT
+            if (load_or_create_symmetric_key(cf.policy.enc_p.key_path.c_str(), key, sizeof(key)) != 0) {
+                fprintf(
+                    stderr,
+                    RED "[ERROR] Failed to create/load symmetric key\n" RESET
+                );
+                return EXIT_FAILURE;
+            }
+
+            auto fn = [&](const std::string& src, const std::string& dest) -> int {
+                return encrypt_file_symmetric(
+                    key, 
+                    src.c_str(), 
+                    dest.c_str(), 
+                    on_all
+                );
+            };
+
+            return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+
+        } else { // DECRYPT
+
+            if (load_key(cf.policy.enc_p.key_path.c_str(), key, sizeof(key)) != 0) {
+                std::fprintf(
+                    stderr,
+                    RED "[ERROR] Failed to load asymmetric key pair\n" RESET
+                );
+                return EXIT_FAILURE;
+            }
+
+            auto fn = [&](const std::string& src, const std::string& dest) -> int {
+                return decrypt_file_symmetric(
+                    key,
+                    src.c_str(),
+                    dest.c_str(),
+                    on_all
+                );
+            };
+
+            return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
 
-        auto fn = [&](const std::string& src, const std::string& dest) -> int {
-            return encrypt_file_symmetric(
-                key, 
-                src.c_str(), 
-                dest.c_str(), 
-                on_all
-            );
-        };
-
-        return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
-
-    } else {
+    } else { // ASYMMETRIC
 
         unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
         unsigned char pr_key [crypto_box_SECRETKEYBYTES];
