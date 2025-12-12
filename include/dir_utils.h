@@ -72,7 +72,29 @@ struct batch_t {
     size_t qsize() const { return pending.size(); }
 
     int get_id() const { return id; }
-    void set_id(int new_id) { id = new_id; }
+    int increment_id() { return ++id; }
+
+    std::string get_name() const {
+        std::time_t t = std::time(nullptr);
+        std::tm tm{};
+#if defined(__unix__) || defined(__APPLE__)
+        localtime_r(&t, &tm);
+#else
+        tm = *std::localtime(&t);
+#endif
+        
+        char ts[64];
+        if (std::strftime(ts, sizeof(ts), DEFAULT_DATE_FORMAT, &tm) == 0) return "";
+
+        char out[256];
+        snprintf(
+            out, 
+            sizeof(out), 
+            "batch_%03d_%s.%s", id, ts, format.c_str()
+        );
+
+        return std::string(out);
+    }
 
     bool compress(const std::string& out_path, std::string_view format) const {
         if (pending.empty()) return false;
@@ -304,6 +326,7 @@ private:
 
         return true;
     }
+
 };
 
 class FileSender {
@@ -314,11 +337,8 @@ public:
 
     FileSender(Sender& s, batch_t* batch, file_db* db = nullptr) : sender_(s), db_(db), batch_(batch) {}
 
-    // Send a single file (encrypt + send + no end)
     bool send_one_file(const std::string& file_path);
 
-    // Send a path (file or directory); if directory, monitor new files
-    // until no new files appear for 'timeout' seconds. Then send_end().
     bool send_files_from_path(
         const std::string& path, 
         std::chrono::seconds timeout

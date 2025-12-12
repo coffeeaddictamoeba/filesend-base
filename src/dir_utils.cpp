@@ -187,29 +187,21 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
     } 
     
     if (batch_->ready) {
-        auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-
-        std::ostringstream compressed;
-        compressed << "batch_" 
-                   << std::setw(3) << std::setfill('0') << batch_->get_id() << "_" 
-                   << std::put_time(std::localtime(&now), DEFAULT_DATE_FORMAT) << "." 
-                   << batch_->format;
+        std::string archive = batch_->get_name();
         
-        std::string compressed_str = compressed.str();
-        
-        if (!batch_->compress(compressed_str, batch_->format)) {
+        if (!batch_->compress(archive, batch_->format)) {
             fprintf(
                 stderr,
-                RED "[ERROR] Compression failed in batch %s\n" RESET, compressed_str.c_str()
+                RED "[ERROR] Compression failed in batch %s\n" RESET,archive.c_str()
             );
             batch_->clear();
             return false;
         }
 
-        if (!process_one_file(compressed_str, nullptr)) {
+        if (!process_one_file(archive, nullptr)) {
             fprintf(
                 stderr,
-                RED "[ERROR] Warning: failed to process batch %s\n" RESET, compressed_str.c_str()
+                RED "[ERROR] Warning: failed to process batch %s\n" RESET, archive.c_str()
             );
             batch_->clear();
             return false;
@@ -218,10 +210,10 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
         fprintf(
             stdout, 
             "[INFO] Sending batch: %s (queue size: %zu/%zu)\n", 
-            compressed_str.c_str(), batch_->qsize(), batch_->size
+            archive.c_str(), batch_->qsize(), batch_->size
         );
 
-        batch_->set_id(batch_->get_id()+1);
+        batch_->increment_id();
         batch_->clear();
     }
     
