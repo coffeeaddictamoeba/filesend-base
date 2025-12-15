@@ -20,7 +20,7 @@ int make_readonly(const char *path) {
     return 0;
 }
 
-bool match_pattern(const char* p, const char* t) {
+int match_pattern(const char* p, const char* t) {
     size_t p_idx     = 0;
     size_t t_idx     = 0;
     size_t match_pos = 0; // position in text when last '*' was seen
@@ -46,8 +46,7 @@ bool match_pattern(const char* p, const char* t) {
             t_idx = match_pos;
         }
 
-        // Case 4: no match
-        else return false;
+        else return 0;
     }
 
     while (p_idx < p_len && p[p_idx] == '*') ++p_idx;

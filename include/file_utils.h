@@ -27,7 +27,7 @@ typedef struct {
 
 int make_readonly(const char *path);
 
-bool match_pattern(
+int match_pattern(
     const char* p, 
     const char* text
 );

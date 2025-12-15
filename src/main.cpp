@@ -20,14 +20,8 @@
 #include "../include/file_utils.h"
 #include "../include/db_utils.hpp"
 
-int process_path(const filesend_config_t& cf, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
-    std::string init(cf.init_path);
-
-    const bool has_wildcards = init.find_first_of("*?") != std::string::npos;
-
-    std::string dest_base = cf.dest_path.empty() ? init : cf.dest_path;
-
-    if (has_wildcards) {
+int process_path(const std::string& init, std::string& dest, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
+    if (init.find_first_of("*?") != std::string::npos) {
         std::string::size_type slash = init.find_last_of('/');
         std::string src_dir;
         std::string pattern;
@@ -53,11 +47,11 @@ int process_path(const filesend_config_t& cf, const std::function<int(const std:
             return -1;
         }
 
-        if (cf.dest_path == cf.init_path) {
-            dest_base = src_dir;
+        if (dest.empty() || dest == init) {
+            return process_dir(src_dir, src_dir, pattern, fn);
+        } else {;
+            return process_dir(src_dir, dest, pattern, fn);
         }
-
-        return process_dir(src_dir, dest_base, pattern, fn);
     }
 
     struct stat st{};
@@ -68,32 +62,28 @@ int process_path(const filesend_config_t& cf, const std::function<int(const std:
 
     // Single file
     if (S_ISREG(st.st_mode)) {
-        std::string src = init;
-        std::string dest;
-        std::string base = cf.dest_path.empty() ? cf.init_path : cf.dest_path;
+        dest = dest.empty() ? init : dest;
 
         struct stat dstst{};
-        if (stat(base.c_str(), &dstst) == 0 && S_ISDIR(dstst.st_mode)) {
-            auto pos = src.find_last_of('/');
-            std::string fname = (pos == std::string::npos) ? src : src.substr(pos + 1);
-            dest = base + "/" + fname;
-        } else {
-            dest = base;
+        if (stat(dest.c_str(), &dstst) == 0 && S_ISDIR(dstst.st_mode)) {
+            auto pos = init.find_last_of('/');
+            dest += "/";
+            dest += (pos == std::string::npos) ? init : init.substr(pos + 1);
         }
 
-        return fn(src, dest);
+        return fn(init, dest);
     }
 
     if (!S_ISDIR(st.st_mode)) {
         fprintf(
             stderr,
-            "[ERROR] %s is neither file nor directory\n", cf.init_path.c_str()
+            "[ERROR] %s is neither file nor directory\n", init.c_str()
         );
         return -1;
     }
 
     const std::string pattern = "";
-    return process_dir(init, dest_base, pattern, fn);
+    return process_dir(init, dest, pattern, fn);
 }
 
 void usage(const char* prog) {
@@ -124,6 +114,7 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
     cf.device_id      = "pi";
     cf.batch_size     = 1;
     cf.policy.timeout = std::chrono::seconds(0);
+    cf.policy.enc_p.dec_key_path = DEFAULT_PR_KEY_PATH; // creation-only
 
     if (std::strcmp(cf.mode.c_str(), "send") == 0) {
         if (argc < 5) {
@@ -431,7 +422,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (process_path(cf.init_path, cf.dest_path, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
         } else { // DECRYPT
 
@@ -452,7 +443,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (process_path(cf.init_path, cf.dest_path, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
 
     } else { // ASYMMETRIC
@@ -482,7 +473,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (process_path(cf.init_path, cf.dest_path, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
         } else { // DECRYPT
             if (load_key(cf.policy.enc_p.key_path.c_str(), pub_key, sizeof(pub_key))     != 0 ||
@@ -504,7 +495,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (process_path(cf, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (process_path(cf.init_path, cf.dest_path, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
     }
 
