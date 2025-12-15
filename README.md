@@ -10,6 +10,7 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 filesend send    [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--all] [--timeout <n>] [--retry <n>] [--no-retry] [--batch <n>]
 filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--timeout <n>]
 filesend decrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--timeout <n>]
+filesend verify  <path> <sha256>
 ```
 
 #### Mode: `send`
@@ -80,6 +81,8 @@ Encrypts a file locally.
 filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>][--timeout <n>]
 ```
 
+NOTE: `<path>` supports pattern-based path definition like `*.png` or `log_???.txt`. If you want to use a pattern instead of direct path, put your pattern in " " symbols: `filesend encrypt "*.png" --asymmetric --all`
+
 Arguments:
 
 * **`--asymmetric`** – use sealed box with public key
@@ -106,7 +109,7 @@ filesend encrypt raw/data.bin --symmetric --all
 
 ---
 
-Decrypts a file previously encrypted with `filesend`.
+Decrypts a file previously encrypted with `filesend`. Can be used on server side.
 
 ```
 filesend decrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>][--timeout <n>]
@@ -146,7 +149,19 @@ filesend decrypt images/cam01.img.enc \
     --asymmetric --all
 ```
 
+#### Mode: `verify`
+
+---
+
+```
+filesend verify <path> <sha256>
+```
+
+Verifies file's SHA-256 (both raw and hex formats). Can be used on server side.
+
 ### Notes & Recommendations
+
+**NOTE:** `<path>` in `encrypt` and `decrypt` supports **pattern-based path definition** like `*.png `or `log_???.txt `. If you want to use a pattern instead of direct path, put your pattern in " " symbols: `filesend encrypt "*.png" --asymmetric --all`
 
 * `--all` enables encryption/decryption of **metadata** (mtime, mode, uid/gid).
 * URL  **must include `/upload`** , as the server expects this endpoint.

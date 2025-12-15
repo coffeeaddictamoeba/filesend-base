@@ -20,29 +20,27 @@ int make_readonly(const char *path) {
     return 0;
 }
 
-int match_pattern(const char* p, const char* text) {
+bool match_pattern(const char* p, const char* t) {
     size_t p_idx     = 0;
     size_t t_idx     = 0;
     size_t match_pos = 0; // position in text when last '*' was seen
-    size_t star_pos  = -1;      // last position of '*' in pattern
+    size_t star_pos  = 0; // last position of '*' in pattern
 
     size_t p_len = strlen(p);
+    size_t t_len = strlen(t);
 
-    while (t_idx < strlen(text)) {
-        // Case 1: '*': record its position and move on in pattern
+    while (t_idx < t_len) {
         if (p_idx < p_len && p[p_idx] == '*') {
             star_pos = p_idx++;
             match_pos = t_idx;
         }
 
-        // Case 2: char match or '?'
-        else if (p_idx < p_len && (p[p_idx] == '?' || p[p_idx] == text[t_idx])) {
+        else if (p_idx < p_len && (p[p_idx] == '?' || p[p_idx] == t[t_idx])) {
             ++p_idx;
             ++t_idx;
         }
 
-        // Case 3: last pattern char was '*'
-        else if (star_pos > 0) {
+        else if (star_pos != std::string::npos) {
             p_idx = star_pos + 1;
             ++match_pos;
             t_idx = match_pos;
@@ -52,7 +50,7 @@ int match_pattern(const char* p, const char* text) {
         else return false;
     }
 
-    while (p_idx < p_len && p[p_idx] == '*') ++p;
+    while (p_idx < p_len && p[p_idx] == '*') ++p_idx;
 
     return p_idx == p_len;
 }
