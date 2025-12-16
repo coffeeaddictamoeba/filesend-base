@@ -83,13 +83,11 @@ int process_dir(const std::string& src_dir, std::string& dest_base, const std::s
     return ret;
 }
 
-bool FileSender::send_one_file(const std::string& file_path) {
-    fs::path p(file_path);
+bool FileSender::send_one_file(const fs::path& p) {
     if (!fs::exists(p) || !fs::is_regular_file(p)) {
         fprintf(
             stderr, 
-            RED "[ERROR] %s is not a regular file\n" RESET, 
-            file_path.c_str()
+            RED "[ERROR] %s is not a regular file\n" RESET, p.c_str()
         );
         return false;
     }
@@ -101,27 +99,26 @@ bool FileSender::send_one_file(const std::string& file_path) {
 }
 
 bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::string>* processed) {
-    const std::string name = p.filename().string();
+    const std::string ps = p.string();
 
-    if (db_ && ((strcmp(name.c_str(), DB_NAME) == 0) || db_->is_sent(p.string()))) {
+    if (db_ && db_->is_sent(ps)) {
         fprintf(
             stdout,
             "[INFO] Skipping already sent file (DB): %s\n", p.c_str()
         );
-        if (processed) processed->insert(name);
+        if (processed) processed->insert(p);
         return true;
     }
 
-    if (processed && processed->count(name)) {
-        return true;
-    }
+    if (processed && processed->count(p)) return true;
 
     fprintf(
         stdout, 
-        "[INFO] Processing file: %s (encryption policy: %d)\n", p.c_str(), sender_.get_policy().enc_p.flags
+        "[INFO] Processing file: %s (encryption policy: %d)\n", 
+        p.c_str(), sender_.get_policy().enc_p.flags
     );
 
-    if (!encrypt_in_place(sender_.get_policy(), p.string())) {
+    if (!encrypt_in_place(sender_.get_policy(), ps)) {
         fprintf(
             stderr,
             "[ERROR] Encryption failed for %s\n", p.c_str()
@@ -129,8 +126,7 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
         return false;
     }
 
-    bool sent = sender_.send_file(p.string());
-    if (!sent) {
+    if (!sender_.send_file(ps)) {
         fprintf(
             stderr,
             "[ERROR] Failed to send %s\n", p.c_str()
@@ -138,46 +134,46 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
         return false;
     }
 
-    if (processed) processed->insert(name);
+    if (processed) processed->insert(p);
 
-    if (db_) {
-        if (!db_->insert(p.string())) {
-            fprintf(
-                stderr,
-                "[ERROR] Warning: failed to insert %s to DB\n", p.c_str()
-            );
-        }
+    if (db_ && !db_->insert(ps)) {
+        fprintf(
+            stderr,
+            "[ERROR] Warning: failed to insert %s to DB\n", p.c_str()
+        );
     }
 
     return true;
 }
 
 bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::string>* processed) {
-    const std::string name = p.filename().string();
+    const std::string ps = p.string();
 
     if (!batch_->ready) {
-        if (db_ && ((strcmp(name.c_str(), DB_NAME) == 0) || db_->is_sent(p.string()))) {
+        if (db_ && db_->is_sent(ps)) {
             fprintf(
                 stdout,
                 "[INFO] Skipping already sent file inside batch (DB): %s\n", p.c_str()
             );
-            if (processed) processed->insert(name);
+            if (processed) processed->insert(p);
             return true;
         }
 
-        if (processed && processed->count(name)) return true;
-
-        batch_->add(p.string());
-
-        if (processed) processed->insert(name);
-
-        if (db_) {
-            if (!db_->insert(p.string())) {
-                fprintf(
-                    stderr,
-                    "[ERROR] DB: failed to insert %s\n", p.c_str()
-                );
+        if (processed) {
+            if (processed->count(p)) {
+                return true;
+            } else {
+                processed->insert(p);
             }
+        }
+
+        batch_->add(ps);
+
+        if (db_ && !db_->insert(ps)) {
+            fprintf(
+                stderr,
+                "[ERROR] Warning: failed to insert %s to DB\n", p.c_str()
+            );
         }
 
         fprintf(
@@ -187,7 +183,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
     } 
     
     if (batch_->ready) {
-        std::string archive = batch_->get_name();
+        std::string archive = batch_->get_name_timestamped();
         
         if (!batch_->compress(archive, batch_->format)) {
             fprintf(
@@ -220,56 +216,52 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
     return true;
 }
 
-bool FileSender::send_files_from_path(const std::string& path) {
-    return send_files_from_path(path, sender_.get_policy().timeout);
+bool FileSender::send_files_from_path(const fs::path& p) {
+    return send_files_from_path(p, sender_.get_policy().timeout);
 }
 
-bool FileSender::send_files_from_path(const std::string& path, std::chrono::seconds timeout) {
-    fs::path root(path);
-
-    if (!fs::exists(root)) {
+bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds timeout) {
+    if (!fs::exists(p)) {
         fprintf(
             stderr,
-            RED "[ERROR] Path %s does not exist\n" RESET, path.c_str()
+            RED "[ERROR] Path %s does not exist\n" RESET, p.c_str()
         );
         return false;
     }
 
     // Single file mode
-    if (fs::is_regular_file(root)) {
-        bool ok = process_one_file(root, nullptr);
-        if (ok) {
-            sender_.send_end();
-        }
+    if (fs::is_regular_file(p)) {
+        bool ok = process_one_file(p, nullptr);
+        if (ok) sender_.send_end();
         return ok;
     }
 
     // Directory mode
-    if (!fs::is_directory(root)) {
+    if (!fs::is_directory(p)) {
         fprintf(
             stderr,
-            RED "[ERROR] %s is neither file nor directory\n" RESET, path.c_str()
+            RED "[ERROR] %s is neither file nor directory\n" RESET, p.c_str()
         );
         return false;
     }
 
     std::unordered_set<std::string> processed;
+
     auto last_new = std::chrono::steady_clock::now();
-    const auto poll_interval = std::chrono::seconds(1);// increases on success, stays on failure (ok?)
+    const auto poll_interval = std::chrono::seconds(1);
 
     while (true) {
         bool new_in_this_round = false;
 
-        for (auto& entry : fs::directory_iterator(root)) {
+        for (auto& entry : fs::directory_iterator(p)) {
             if (!entry.is_regular_file()) continue;
 
-            const fs::path p = entry.path();
-            const std::string name = p.filename().string();
+            const fs::path e = entry.path();
 
-            if (processed.count(name)) continue;
+            if (processed.count(e)) continue;
 
             if (batch_ && batch_->size > 1) {
-                if (!process_one_batch(p, &processed)) {
+                if (!process_one_batch(e, &processed)) {
                     fprintf(
                         stderr,
                         RED "[ERROR] Warning: failed to process batch %d\n" RESET, batch_->get_id()
@@ -277,10 +269,10 @@ bool FileSender::send_files_from_path(const std::string& path, std::chrono::seco
                     continue;
                 }
             } else {
-                if (!process_one_file(p,  &processed)) {
+                if (!process_one_file(e,  &processed)) {
                     fprintf(
                         stderr,
-                        RED "[ERROR] Warning: failed to process %s\n" RESET, p.c_str()
+                        RED "[ERROR] Warning: failed to process %s\n" RESET, e.c_str()
                     );
                     continue;
                 }

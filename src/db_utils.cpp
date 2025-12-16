@@ -106,6 +106,10 @@ bool file_db::save() const {
 }
 
 bool file_db::is_sent(const std::string& file_path) const {
+    if (strcmp(file_path.c_str(), db_path().c_str()) == 0) {
+        return true; // don't send the DB itself
+    }
+
     auto it = idx_by_path_.find(file_path);
     if (it == idx_by_path_.end()) {
         return false;

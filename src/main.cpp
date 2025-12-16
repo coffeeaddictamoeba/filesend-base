@@ -193,10 +193,9 @@ int parse_args(int argc, char** argv, filesend_config_t& cf) {
                 cf.batch_size = std::max((int)cf.batch_size, std::atoi(argv[++i]));
 
                 if (i + 1 < argc) {
-                    char* next_arg = argv[i+1];
                     for (const auto& format : COMPRESSION_FORMATS_AVAILABLE) {
-                        if (strcmp(format, next_arg) == 0) {
-                            cf.batch_format = next_arg;
+                        if (strcmp(format, argv[i+1]) == 0) {
+                            cf.batch_format = argv[++i];
                             break;
                         }
                     }
@@ -352,7 +351,7 @@ int main(int argc, char** argv) {
 
         // Transport
         std::unique_ptr<Sender> sender;
-        std::unique_ptr<batch_t> batch;
+        std::unique_ptr<file_batch> batch;
 
         if (cf.use_ws) {
             sender = std::make_unique<WsSender>(
@@ -369,7 +368,7 @@ int main(int argc, char** argv) {
 
         std::unique_ptr<FileSender> s;
         if (cf.batch_size > 1) {
-            batch = std::make_unique<batch_t>(cf.batch_size, cf.batch_format);
+            batch = std::make_unique<file_batch>(cf.batch_size, cf.batch_format);
             s = std::make_unique<FileSender>(
                 *sender, 
                 batch.get(),
