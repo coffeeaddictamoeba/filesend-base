@@ -20,7 +20,7 @@ extern "C" {
 #include "key_utils.h"
 
 // Retry configuration
-struct retry_policy_t {
+struct RetryPolicy {
     int max_attempts{DEFAULT_RETRIES};
     std::chrono::milliseconds delay{WAIT_BEFORE_RECONNECT};
 
@@ -28,29 +28,29 @@ struct retry_policy_t {
 };
 
 // Encryption configuration
-struct enc_policy_t {
+struct EncryptionPolicy {
     uint32_t flags{0};         // |Res|Res|All|Sym|Enc|
     std::string key_path;      // could be symmetric or public key path depending on flags
     std::string dec_key_path;  // only for decrypt
 };
 
 // Send configuration
-struct send_policy_t {
+struct FilesendPolicy {
     std::chrono::seconds timeout;
-    retry_policy_t retry_send;
-    retry_policy_t retry_connect;
-    enc_policy_t enc_p;
+    RetryPolicy retry_send;
+    RetryPolicy retry_connect;
+    EncryptionPolicy enc_p;
     std::string cert_path;
     std::string url;
 };
 
 class Sender {
 public:
-    explicit Sender(const send_policy_t& policy) : policy_(policy) {}
+    explicit Sender(const FilesendPolicy& policy) : policy_(policy) {}
 
     virtual ~Sender() = default;
 
-    const send_policy_t& get_policy() const { return policy_; }
+    const FilesendPolicy& get_policy() const { return policy_; }
 
     // Send ONE file. Path may be already encrypted; flags tell server how to handle.
     virtual bool send_file(const std::string& file_path) = 0;
@@ -59,12 +59,12 @@ public:
     virtual bool send_end() = 0;
 
 private:
-    send_policy_t policy_;
+    FilesendPolicy policy_;
 };
 
 // run with retries
 template <typename func>
-bool run_with_retries(const retry_policy_t& policy, const std::string& what, func&& f) {
+bool run_with_retries(const RetryPolicy& policy, const std::string& what, func&& f) {
     int attempts = 0;
     const int max_attempts = policy.enabled() ? policy.max_attempts : 1;
 
@@ -87,7 +87,7 @@ bool run_with_retries(const retry_policy_t& policy, const std::string& what, fun
 }
 
 // encrypt in-place
-inline bool encrypt_in_place(const send_policy_t& policy, const std::string& file_path) {
+inline bool encrypt_in_place(const FilesendPolicy& policy, const std::string& file_path) {
     if (!(policy.enc_p.flags & ENC_FLAG_ENABLED)) {
         fprintf(
             stderr, 

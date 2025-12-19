@@ -9,7 +9,7 @@ class HttpsSender : public Sender {
 public:
     HttpsSender(
         const std::string& device_id,
-        send_policy_t& policy
+        FilesendPolicy& policy
     );
 
     ~HttpsSender() override;
@@ -19,7 +19,7 @@ public:
 
 private:
     std::string device_id_;
-    const send_policy_t& policy_;
+    const FilesendPolicy& policy_;
 
     CURL* curl_{nullptr};
 

@@ -3,7 +3,7 @@
 
 #include "../include/sender_https.hpp"
 
-HttpsSender::HttpsSender(const std::string& device_id, send_policy_t& policy) : Sender(policy), device_id_(device_id), policy_(policy) {
+HttpsSender::HttpsSender(const std::string& device_id, FilesendPolicy& policy) : Sender(policy), device_id_(device_id), policy_(policy) {
     curl_ = curl_easy_init();
     if (!curl_) {
         throw std::runtime_error("curl_easy_init failed");

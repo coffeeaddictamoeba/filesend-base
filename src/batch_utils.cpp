@@ -2,17 +2,17 @@
 
 #include "../include/dir_utils.h"
 
-file_batch::file_batch(std::size_t batch_size) : size(batch_size) {
+FileBatch::FileBatch(std::size_t batch_size) : size(batch_size) {
     pending.reserve(size);
     id = 1;
 }
 
-file_batch::file_batch(std::size_t batch_size, std::string& batch_format) : size(batch_size), format(batch_format) {
+FileBatch::FileBatch(std::size_t batch_size, std::string& batch_format) : size(batch_size), format(batch_format) {
     pending.reserve(size);
     id = 1;
 }
 
-void file_batch::add(std::string_view file_path) {
+void FileBatch::add(std::string_view file_path) {
     if (ready) return;
 
     pending.emplace_back(file_path);
@@ -21,7 +21,7 @@ void file_batch::add(std::string_view file_path) {
     }
 }
 
-void file_batch::remove(std::string_view file_path) {
+void FileBatch::remove(std::string_view file_path) {
     if (pending.empty()) return;
 
     pending.erase(
@@ -33,12 +33,12 @@ void file_batch::remove(std::string_view file_path) {
     );
 }
 
-void file_batch::clear() {
+void FileBatch::clear() {
     pending.clear();
     ready = false;
 }
 
-std::string file_batch::get_name_timestamped() const {
+std::string FileBatch::get_name_timestamped() const {
     std::time_t t = std::time(nullptr);
     std::tm tm{};
 
@@ -61,7 +61,7 @@ std::string file_batch::get_name_timestamped() const {
     return std::string(out);
 }
 
-bool file_batch::compress(const std::string& out_path, std::string_view format) const {
+bool FileBatch::compress(const std::string& out_path, std::string_view format) const {
     if (pending.empty()) return false;
 
     fprintf(
@@ -72,7 +72,7 @@ bool file_batch::compress(const std::string& out_path, std::string_view format) 
     fs::path out(out_path);
     if (!out.parent_path().empty()) {
         std::error_code ec;
-        std::filesystem::create_directories(out.parent_path(), ec);
+        fs::create_directories(out.parent_path(), ec);
         if (ec) {
             fprintf(
                 stderr,
@@ -96,7 +96,7 @@ bool file_batch::compress(const std::string& out_path, std::string_view format) 
     }
 }
 
-bool file_batch::_compress_tar(const std::string& out_path, bool gzipped) const {
+bool FileBatch::_compress_tar(const std::string& out_path, bool gzipped) const {
     struct archive *a = archive_write_new();
     if (!a) {
         fprintf(
@@ -234,7 +234,7 @@ bool file_batch::_compress_tar(const std::string& out_path, bool gzipped) const 
     return true;
 }
 
-bool file_batch::_compress_zip(const std::string& out_path) const {
+bool FileBatch::_compress_zip(const std::string& out_path) const {
     zip_t* zip = zip_open(out_path.c_str(), ZIP_CREATE | ZIP_EXCL, nullptr);
     if (!zip) {
         perror(RED "[ERROR] Failed to create zip archive" RESET);

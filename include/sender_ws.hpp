@@ -7,7 +7,7 @@ class WsSender : public Sender {
 public:
     WsSender(
         const std::string& device_id,
-        send_policy_t& policy
+        FilesendPolicy& policy
     );
 
     ~WsSender() override = default;
@@ -17,7 +17,7 @@ public:
 
 private:
     std::string device_id_;
-    const send_policy_t& policy_;
+    const FilesendPolicy& policy_;
 
     WsClient client_;
     bool connected_{false};

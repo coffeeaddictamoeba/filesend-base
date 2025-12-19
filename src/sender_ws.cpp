@@ -2,7 +2,7 @@
 
 #include "../include/sender_ws.hpp"
 
-WsSender::WsSender(const std::string& device_id, send_policy_t& policy)
+WsSender::WsSender(const std::string& device_id, FilesendPolicy& policy)
     : Sender(policy),
       device_id_(device_id),
       policy_(policy),

@@ -23,7 +23,7 @@ static std::string dirname_of(std::string_view path) {
     return std::string(path.substr(0, pos));
 }
 
-file_db::file_db(const std::string& db_path) {
+SentFileDatabase::SentFileDatabase(const std::string& db_path) {
     db_path_ = dirname_of(db_path);
     db_path_ += '/' ;
     db_path_ += DB_NAME;
@@ -34,7 +34,7 @@ file_db::file_db(const std::string& db_path) {
     );
 }
 
-bool file_db::serialize(std::ostream& out, const db_entry_t& e) const {
+bool SentFileDatabase::serialize(std::ostream& out, const db_entry_t& e) const {
     uint32_t len = e.file_path.size();
     out.write((char*)&len, 4);
     out.write(e.file_path.data(), len);
@@ -45,7 +45,7 @@ bool file_db::serialize(std::ostream& out, const db_entry_t& e) const {
     return out.good();
 }
 
-bool file_db::deserialize(std::istream& in, db_entry_t& e) {
+bool SentFileDatabase::deserialize(std::istream& in, db_entry_t& e) {
     uint32_t len;
     if (!in.read((char*)&len, 4)) return false;
 
@@ -62,7 +62,7 @@ bool file_db::deserialize(std::istream& in, db_entry_t& e) {
     return true;
 }
 
- bool file_db::stat_file(const std::string& file_path, uint64_t& mtime, uint64_t& size) {
+ bool SentFileDatabase::stat_file(const std::string& file_path, uint64_t& mtime, uint64_t& size) {
     struct stat st;
     if (::stat(file_path.c_str(), &st) != 0) {
         return false;
@@ -72,7 +72,7 @@ bool file_db::deserialize(std::istream& in, db_entry_t& e) {
     return true;
 }
 
-bool file_db::load() {
+bool SentFileDatabase::load() {
     entries_.clear();
     idx_by_path_.clear();
     entries_.reserve(DB_INIT_SIZE);
@@ -91,7 +91,7 @@ bool file_db::load() {
     return true;
 }
 
-bool file_db::save() const {
+bool SentFileDatabase::save() const {
     std::ofstream out(db_path_, std::ios::binary | std::ios::trunc);
     if (!out.is_open()) {
         std::perror("[ERROR] fopen save");
@@ -105,8 +105,8 @@ bool file_db::save() const {
     return true;
 }
 
-bool file_db::is_sent(const std::string& file_path) const {
-    if (strcmp(file_path.c_str(), db_path().c_str()) == 0) {
+bool SentFileDatabase::is_sent(const std::string& file_path) const {
+    if (strcmp(file_path.c_str(), get_path().c_str()) == 0) {
         return true; // don't send the DB itself
     }
 
@@ -131,7 +131,7 @@ bool file_db::is_sent(const std::string& file_path) const {
     return (e.mtime == mtime) && (e.size == size);
 }
 
-bool file_db::insert(const std::string& file_path) {
+bool SentFileDatabase::insert(const std::string& file_path) {
     uint64_t mtime, size;
     if (!stat_file(file_path, mtime, size)) {
         fprintf(
@@ -161,7 +161,7 @@ bool file_db::insert(const std::string& file_path) {
     return save();
 }
 
-bool file_db::clear() {
+bool SentFileDatabase::clear() {
     entries_.clear();
     idx_by_path_.clear();
 
@@ -174,7 +174,7 @@ bool file_db::clear() {
     return true;
 }
 
-bool file_db::remove(const std::string& file_path) {
+bool SentFileDatabase::remove(const std::string& file_path) {
     auto it = idx_by_path_.find(file_path);
     if (it == idx_by_path_.end()) {
         return false;

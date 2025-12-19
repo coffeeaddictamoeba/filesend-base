@@ -17,6 +17,8 @@
 
 #define DEFAULT_DATE_FORMAT "%Y%m%d_%H%M%S"
 
+#define DEFAULT_DEVICE_ID "pi"
+
 // Default paths for creation of keys. Do not set to actual key locations.
 #define DEFAULT_SYM_KEY_PATH "sym_key.bin"
 #define DEFAULT_PR_KEY_PATH  "pr_key.bin"
@@ -34,6 +36,8 @@ constexpr const char* PUB_KEY_ENV   = "PUB_KEY_PATH";
 constexpr const char* PR_KEY_ENV    = "PR_KEY_PATH";
 constexpr const char* SYM_KEY_ENV   = "SYM_KEY_PATH";
 constexpr const char* CERT_PATH_ENV = "CERT_PATH";
+
+constexpr const char* DEVICE_ID_ENV = "DEVICE_ID";
 
 constexpr const char* COMPRESSION_FORMATS_AVAILABLE[] = {
     "zip",

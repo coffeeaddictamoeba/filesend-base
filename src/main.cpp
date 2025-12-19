@@ -13,7 +13,7 @@
 #include <sodium.h>
 #include <curl/curl.h>
 
-#include "../include/config.h"
+#include "../include/arg_utils.h"
 #include "../include/sender_https.hpp"
 #include "../include/sender_ws.hpp"
 #include "../include/dir_utils.h"
@@ -86,254 +86,11 @@ int process_path(const std::string& init, std::string& dest, const std::function
     return process_dir(init, dest, pattern, fn);
 }
 
-void usage(const char* prog) {
-    fprintf(
-        stderr,
-        "Usage:\n"
-        "  %s send  [--https|--ws]  <path> <url> "
-        "[--encrypt symmetric|asymmetric] [--all] "
-        "[--timeout <n>] [--retry <n>] [--no-retry] [--batch <n> <format>]\n"
-        "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>]\n"
-        "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>]\n"
-        "  %s verify <path> <sha256>\n",
-        prog, prog, prog, prog
-    );
-}
+int main(int argc, char** argv) { 
+    ArgParser a{}; 
+    if (a.parse(argc, argv) != 0) return EXIT_FAILURE;
 
-int parse_args(int argc, char** argv, filesend_config_t& cf) {
-    if (argc < 3) {
-        usage(argv[0]);
-        return -1;
-    }
-
-    cf = {};
-
-    cf.mode           = argv[1];
-    cf.device_id      = "pi";
-    cf.batch_size     = 1;
-    cf.policy.timeout = std::chrono::seconds(0);
-    cf.policy.enc_p.dec_key_path = DEFAULT_PR_KEY_PATH; // creation-only
-
-    if (std::strcmp(cf.mode.c_str(), "send") == 0) {
-        if (argc < 5) {
-            std::fprintf(
-                stderr,
-                RED "[ERROR] send mode requires [--https|--ws] <path> <url>\n" RESET
-            );
-            usage(argv[0]);
-            return -1;
-        }
-
-        cf.use_ws     = (std::strcmp(argv[2], "--ws") == 0);
-        cf.init_path  = argv[3];
-
-        if (!fs::exists(cf.init_path)) {
-            fprintf(
-                stderr, 
-                RED "[ERROR] There is no path with name \"%s\" \r\n" RESET, cf.init_path.c_str()
-            );
-            return -1;
-        }
-
-        cf.policy.url = argv[4];
-        cf.policy.cert_path = getenv_or_default(
-            CERT_PATH_ENV, 
-            DEFAULT_CA_CERT_PATH
-        );
-
-        for (int i = 5; i < argc; ++i) {
-            const char* arg = argv[i];
-
-            if (std::strcmp(arg, "--encrypt") == 0) {
-                if (i + 1 >= argc) {
-                    fprintf(
-                        stderr,
-                        RED "[ERROR] --encrypt requires 'symmetric' or 'asymmetric'\n" RESET
-                    );
-                    return -1;
-                }
-
-                cf.policy.enc_p.flags |= ENC_FLAG_ENABLED;
-
-                const char* mode = argv[++i];
-
-                if (std::strcmp(mode, "symmetric") == 0) {
-                    cf.policy.enc_p.flags   |= ENC_FLAG_SYMMETRIC;
-                    cf.policy.enc_p.key_path = getenv_or_default(
-                        SYM_KEY_ENV, 
-                        DEFAULT_SYM_KEY_PATH
-                    );
-                } else if (std::strcmp(mode, "asymmetric") == 0) {
-                    cf.policy.enc_p.key_path = getenv_or_default(
-                        PUB_KEY_ENV, 
-                        DEFAULT_PUB_KEY_PATH
-                    );
-                } else {
-                    std::fprintf(
-                        stderr,
-                        RED "[ERROR] Only symmetric and asymmetric key modes are possible\n" RESET
-                    );
-                    return -1;
-                }
-
-            } else if (std::strcmp(arg, "--all") == 0) {
-                cf.policy.enc_p.flags |= ENC_FLAG_ALL;
-
-            } else if (std::strcmp(arg, "--batch") == 0) {
-                if (i + 1 >= argc) {
-                    std::fprintf(
-                        stderr,
-                        RED "[ERROR] --batch requires integer size and compression format\n" RESET
-                    );
-                    return -1;
-                }
-                
-                cf.batch_size = std::max((int)cf.batch_size, std::atoi(argv[++i]));
-
-                if (i + 1 < argc) {
-                    for (const auto& format : COMPRESSION_FORMATS_AVAILABLE) {
-                        if (strcmp(format, argv[i+1]) == 0) {
-                            cf.batch_format = argv[++i];
-                            break;
-                        }
-                    }
-                }
-
-                if (cf.batch_format.empty()) cf.batch_format = DEFAULT_COMPRESSION_FORMAT;
-
-            } else if (std::strcmp(arg, "--timeout") == 0) {
-                if (i + 1 >= argc) {
-                    std::fprintf(
-                        stderr,
-                        RED "[ERROR] --timeout requires integer seconds\n" RESET
-                    );
-                    return -1;
-                }
-
-                cf.policy.timeout = std::max(
-                    cf.policy.timeout, 
-                    std::chrono::seconds(std::atoi(argv[++i]))
-                );
-
-            } else if (std::strcmp(arg, "--retry") == 0) {
-                if (i + 1 >= argc) {
-                    std::fprintf(
-                        stderr,
-                        RED "[ERROR] --retry requires integer count\n" RESET
-                    );
-                    return -1;
-                }
-
-                // make separate options later
-                cf.policy.retry_send.max_attempts 
-                = cf.policy.retry_connect.max_attempts 
-                = std::abs(std::atoi(argv[++i]));
-
-            } else if (std::strcmp(arg, "--no-retry") == 0) {
-                cf.policy.retry_send.max_attempts 
-                = cf.policy.retry_connect.max_attempts 
-                = 1;
-
-            } else {
-                std::fprintf(
-                    stderr,
-                    RED "[ERROR] Unknown argument in send mode: %s\n" RESET, arg
-                );
-                return -1;
-            }
-        }
-
-    } else if (std::strcmp(cf.mode.c_str(), "encrypt") == 0 || std::strcmp(cf.mode.c_str(), "decrypt") == 0) {
-        cf.init_path = argv[2];
-        cf.policy.enc_p.flags |= ENC_FLAG_ENABLED;
-
-        if (strcmp(cf.mode.c_str(), "decrypt") == 0) {
-            cf.policy.enc_p.dec_key_path = getenv_or_default(
-                PR_KEY_ENV, 
-                DEFAULT_PR_KEY_PATH
-            );
-        }
-
-        for (int i = 3; i < argc; ++i) {
-            const char* arg = argv[i];
-
-            if (std::strcmp(arg, "--symmetric") == 0) {
-                cf.policy.enc_p.flags   |= ENC_FLAG_SYMMETRIC;
-                cf.policy.enc_p.key_path = getenv_or_default(
-                    SYM_KEY_ENV, 
-                    DEFAULT_SYM_KEY_PATH
-                );
-            } else if (std::strcmp(arg, "--asymmetric") == 0) {
-                cf.policy.enc_p.key_path = getenv_or_default(
-                    PUB_KEY_ENV, 
-                    DEFAULT_PUB_KEY_PATH
-                );
-
-            } else if (std::strcmp(arg, "--all") == 0) {
-                cf.policy.enc_p.flags |= ENC_FLAG_ALL;
-
-            } else if (std::strcmp(arg, "--dest") == 0) {
-                if (i + 1 >= argc) {
-                    std::fprintf(
-                        stderr,
-                        RED "[ERROR] --dest requires a file/directory path\n" RESET
-                    );
-                    return -1;
-                }
-                cf.dest_path = argv[++i];
-
-            } else if (std::strcmp(arg, "--timeout") == 0) {
-                if (i + 1 >= argc) {
-                    std::fprintf(
-                        stderr,
-                        RED "[ERROR] --timeout requires integer seconds\n" RESET
-                    );
-                    return -1;
-                }
-
-                cf.policy.timeout = std::max(
-                    cf.policy.timeout, 
-                    std::chrono::seconds(std::atoi(argv[++i]))
-                );
-
-            } else {
-                std::fprintf(
-                    stderr,
-                    RED "[ERROR] Unknown argument in %s mode: %s\n" RESET,
-                    cf.mode.c_str(), arg
-                );
-                return -1;
-            }
-        }
-
-        if (cf.dest_path.empty()) { cf.dest_path = cf.init_path; }
-    
-    } else if (std::strcmp(cf.mode.c_str(), "verify") == 0) {
-        cf.init_path = argv[2];
-        return 0;
-
-    } else {
-        std::fprintf(
-            stderr,
-            RED "[ERROR] Unknown mode: %s\n" RESET, cf.mode.c_str()
-        );
-        usage(argv[0]);
-        return -1;
-    }
-
-    return 0;
-}
-
-int main(int argc, char** argv) {
-    if (argc < 3) {
-        usage(argv[0]);
-        return EXIT_FAILURE;
-    }
-
-    filesend_config_t cf{};
-    if (parse_args(argc, argv, cf) != 0) return EXIT_FAILURE;
+    FilesendConfig cf = a.get_config();
 
     if (sodium_init() < 0) {
         fprintf(
@@ -347,13 +104,13 @@ int main(int argc, char** argv) {
     if (strcmp(cf.mode.c_str(), "send") == 0) {
         curl_global_init(CURL_GLOBAL_DEFAULT);
 
-        file_db db(cf.init_path); db.load();
+        SentFileDatabase db(cf.init_path); db.load();
 
-        // Transport
         std::unique_ptr<Sender> sender;
-        std::unique_ptr<file_batch> batch;
+        std::unique_ptr<FileBatch> batch;
 
         if (cf.use_ws) {
+            // WS transport
             sender = std::make_unique<WsSender>(
                 cf.device_id,
                 cf.policy
@@ -368,7 +125,7 @@ int main(int argc, char** argv) {
 
         std::unique_ptr<FileSender> s;
         if (cf.batch_size > 1) {
-            batch = std::make_unique<file_batch>(cf.batch_size, cf.batch_format);
+            batch = std::make_unique<FileBatch>(cf.batch_size, cf.batch_format);
             s = std::make_unique<FileSender>(
                 *sender, 
                 batch.get(),
@@ -394,7 +151,7 @@ int main(int argc, char** argv) {
             cf.init_path.c_str(), 
             sha_received,
             strlen(sha_received)
-        ) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        ) == 0 ? EXIT_SUCCESS : EXIT_FAILURE; // add dir + pattern-based as well?
     }
 
     // ENCRYPT / DECRYPT MODES

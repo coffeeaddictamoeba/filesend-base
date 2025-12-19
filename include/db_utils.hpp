@@ -12,6 +12,8 @@
 
 #include "defaults.h"
 
+class SentFileDatabase {
+
 struct db_entry_t {
     std::string file_path;
     uint64_t mtime;
@@ -19,9 +21,8 @@ struct db_entry_t {
     bool sent;
 };
 
-class file_db {
 public:
-    explicit file_db(const std::string& db_path);
+    explicit SentFileDatabase(const std::string& db_path);
 
     bool load();
     bool clear();
@@ -32,7 +33,7 @@ public:
     bool insert(const std::string& file_path);
     bool remove(const std::string& file_path);
 
-    const std::string& db_path() const { return db_path_; }
+    const std::string& get_path() const { return db_path_; }
 
 private:
     std::string db_path_;

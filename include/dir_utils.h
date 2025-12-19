@@ -27,16 +27,16 @@
 
 namespace fs = std::filesystem;
 
-class file_batch {
+class FileBatch {
 public:
     std::size_t size = 1;
     std::string format = DEFAULT_COMPRESSION_FORMAT;
 
     bool ready = false;
 
-    explicit file_batch(std::size_t batch_size);
+    explicit FileBatch(std::size_t batch_size);
 
-    explicit file_batch(
+    explicit FileBatch(
         std::size_t batch_size, 
         std::string& batch_format
     );
@@ -72,11 +72,11 @@ private:
 
 class FileSender {
 public:
-    FileSender(Sender& s, file_db* db = nullptr) : sender_(s), db_(db) {
+    FileSender(Sender& s, SentFileDatabase* db = nullptr) : sender_(s), db_(db) {
         batch_ = nullptr; 
     }
 
-    FileSender(Sender& s, file_batch* batch, file_db* db = nullptr) : sender_(s), db_(db), batch_(batch) {}
+    FileSender(Sender& s, FileBatch* batch, SentFileDatabase* db = nullptr) : sender_(s), db_(db), batch_(batch) {}
 
     bool send_one_file(const fs::path& p);
 
@@ -89,8 +89,8 @@ public:
 
 private:
     Sender& sender_;
-    file_db* db_;
-    file_batch* batch_;
+    SentFileDatabase* db_;
+    FileBatch* batch_;
 
     bool process_one_file(
         const fs::path& p,
