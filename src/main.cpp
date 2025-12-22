@@ -20,72 +20,6 @@
 #include "../include/file_utils.h"
 #include "../include/db_utils.hpp"
 
-int process_path(const std::string& init, std::string& dest, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
-    if (init.find_first_of("*?") != std::string::npos) {
-        std::string::size_type slash = init.find_last_of('/');
-        std::string src_dir;
-        std::string pattern;
-
-        if (slash == std::string::npos) {
-            src_dir = ".";
-            pattern = init;
-        } else {
-            src_dir = init.substr(0, slash);
-            pattern = init.substr(slash + 1);
-        }
-
-        struct stat st{};
-        if (stat(src_dir.c_str(), &st) != 0) {
-            perror("[ERROR] stat pattern directory");
-            return -1;
-        }
-        if (!S_ISDIR(st.st_mode)) {
-            std::fprintf(
-                stderr,
-                "[ERROR] %s is not a directory\n", src_dir.c_str()
-            );
-            return -1;
-        }
-
-        if (dest.empty() || dest == init) {
-            return process_dir(src_dir, src_dir, pattern, fn);
-        } else {;
-            return process_dir(src_dir, dest, pattern, fn);
-        }
-    }
-
-    struct stat st{};
-    if (stat(init.c_str(), &st) != 0) {
-        perror("[ERROR] stat init_path");
-        return -1;
-    }
-
-    // Single file
-    if (S_ISREG(st.st_mode)) {
-        dest = dest.empty() ? init : dest;
-
-        struct stat dstst{};
-        if (stat(dest.c_str(), &dstst) == 0 && S_ISDIR(dstst.st_mode)) {
-            auto pos = init.find_last_of('/');
-            dest += "/";
-            dest += (pos == std::string::npos) ? init : init.substr(pos + 1);
-        }
-
-        return fn(init, dest);
-    }
-
-    if (!S_ISDIR(st.st_mode)) {
-        fprintf(
-            stderr,
-            "[ERROR] %s is neither file nor directory\n", init.c_str()
-        );
-        return -1;
-    }
-
-    const std::string pattern = "";
-    return process_dir(init, dest, pattern, fn);
-}
-
 int main(int argc, char** argv) { 
     ArgParser a{}; 
     if (a.parse(argc, argv) != 0) return EXIT_FAILURE;
@@ -137,8 +71,13 @@ int main(int argc, char** argv) {
                 &db
             );
         }
-        
+
+#ifdef USE_MULTITHREADING
+        printf("[DEBUG] Running with multithreading option.\n");
+        bool ok = s->send_files_from_path_mt(cf.init_path);
+#else
         bool ok = s->send_files_from_path(cf.init_path);
+#endif
         sender->send_end();
 
         curl_global_cleanup();
@@ -151,7 +90,7 @@ int main(int argc, char** argv) {
             cf.init_path.c_str(), 
             sha_received,
             strlen(sha_received)
-        ) == 0 ? EXIT_SUCCESS : EXIT_FAILURE; // add dir + pattern-based as well?
+        ) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     // ENCRYPT / DECRYPT MODES

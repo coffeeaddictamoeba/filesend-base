@@ -87,6 +87,15 @@ public:
 
     bool send_files_from_path(const fs::path& path);
 
+#ifdef USE_MULTITHREADING
+    bool send_files_from_path_mt(const fs::path& p);
+
+    bool send_files_from_path_mt(
+        const fs::path& p, 
+        std::chrono::seconds timeout
+    );
+#endif
+
 private:
     Sender& sender_;
     SentFileDatabase* db_;
@@ -103,10 +112,9 @@ private:
     );
 };
 
-int process_dir(
-    const std::string& src_dir, 
-    std::string& dest_base, 
-    const std::string& pattern, 
+int process_path(
+    const std::string& init, 
+    std::string& dest, 
     const std::function<int(const std::string& src, const std::string& dest)>& fn
 );
 

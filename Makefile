@@ -1,5 +1,5 @@
 CXX       := g++
-CXXFLAGS  := -std=c++17 -Wall -Wextra -O2 -Iinclude
+CXXFLAGS  := -std=c++17 -Wall -Wextra -O2 -Iinclude -DUSE_MULTITHREADING
 CFLAGS    := -Wall -Wextra -O2 -Iinclude
 LDFLAGS   := -lsodium -lcurl -lssl -lcrypto -lpthread -lzip -larchive
 
