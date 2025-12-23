@@ -73,8 +73,7 @@ int main(int argc, char** argv) {
         }
 
 #ifdef USE_MULTITHREADING
-        printf("[DEBUG] Running with multithreading option.\n");
-        bool ok = s->send_files_from_path_mt(cf.init_path);
+        bool ok = s->send_files_from_path_mt(cf.init_path, cf.nthreads);
 #else
         bool ok = s->send_files_from_path(cf.init_path);
 #endif

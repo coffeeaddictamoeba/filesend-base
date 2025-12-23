@@ -400,12 +400,16 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
 }
 
 #ifdef USE_MULTITHREADING
-bool FileSender::send_files_from_path_mt(const fs::path& p) {
-    return send_files_from_path_mt(p, sender_.get_policy().timeout);
+bool FileSender::send_files_from_path_mt(const fs::path& p, int nthreads = MAX_WORKERS_MT) {
+    return send_files_from_path_mt(p, sender_.get_policy().timeout, nthreads);
 }
 
-bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds timeout) {
+bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds timeout, int nthreads = MAX_WORKERS_MT) {
     DbFlushGuard guard(db_);
+
+    nthreads = nthreads ? std::min(nthreads, MAX_WORKERS_MT) : MAX_WORKERS_MT;
+    
+    printf("[INFO] Running with multithreading available. Current threads number: %d\n", nthreads);
 
     if (fs::is_regular_file(p)) {
         bool ok = process_one_file(p, nullptr);
@@ -447,9 +451,9 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds
     });
 
     std::vector<std::thread> workers;
-    workers.reserve(MAX_WORKERS_MT);
+    workers.reserve(nthreads);
 
-    for (unsigned int i = 0; i < MAX_WORKERS_MT; ++i) {
+    for (int i = 0; i < nthreads; ++i) {
         workers.emplace_back([&, i] {
             std::string path;
             while (qe.pop(path)) {

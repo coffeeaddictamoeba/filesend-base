@@ -12,6 +12,10 @@ struct FilesendConfig {
     std::string batch_format;
     std::size_t batch_size;
 
+#ifdef USE_MULTITHREADING
+    int nthreads;
+#endif
+
     int use_ws;
 };
 
@@ -41,6 +45,7 @@ private:
     void handle_send_encrypt(int& value, int argc, char** argv);
     void handle_send_batch(int& value, int argc, char** argv);
     void handle_send_retry(int& value, int argc, char** argv);
+    void handle_mode_threads(int& value, int argc, char** argv);
 
     // Security arg handlers
     void handle_key_mode(const char* flag, const char* mode);

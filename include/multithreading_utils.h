@@ -15,7 +15,7 @@
 #include <thread>
 #include <limits>
 
-#define MAX_WORKERS_MT 4 // dummy
+#define MAX_WORKERS_MT 4
 
 class unordered_set_mt {
 public:

@@ -25,7 +25,8 @@ void ArgParser::usage(const char* prog) const {
         "Usage:\n"
         "  %s send  [--https|--ws]  <path> <url> "
         "[--encrypt symmetric|asymmetric] [--all] "
-        "[--timeout <n>] [--retry <n>] [--no-retry] [--batch <n> <format>]\n"
+        "[--timeout <n>] [--retry <n>] [--no-retry] "
+        "[--batch <n> <format>] [--nthreads <n>]\n" 
 
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
         "[--dest <file>] [--timeout <n>]\n"
@@ -148,6 +149,26 @@ void ArgParser::handle_mode_timeout(int& value, int argc, char** argv) {
     );
 }
 
+void ArgParser::handle_mode_threads(int& value, int argc, char** argv) {
+#ifdef USE_MULTITHREADING
+    if (value + 1 >= argc) {
+        fprintf(
+            stderr,
+            RED "[ERROR] --nthreads requires positive integer threads number\n" RESET
+        );
+        return;
+    }
+
+    config_.nthreads = std::atoi(argv[++value]);
+#else
+    fprintf(
+        stderr, 
+        YELLOW "[WARN] Program was compiled without support for multithreading. "
+        "To enable it, compile with \"-DUSE_MULTITHREADING\"\n" RESET
+    );
+#endif
+}
+
 void ArgParser::handle_send_retry(int& value, int argc, char** argv) {
     if (value + 1 >= argc) {
         fprintf(
@@ -198,6 +219,7 @@ void ArgParser::handle_send(int argc, char** argv) {
         else if (strcmp(arg, "--timeout") == 0)  { handle_mode_timeout(i, argc, argv); }
         else if (strcmp(arg, "--retry") == 0)    { handle_send_retry(i, argc, argv); }
         else if (strcmp(arg, "--no-retry") == 0) { config_.policy.retry_send.max_attempts = config_.policy.retry_connect.max_attempts = 1; } // separate?
+        else if (strcmp(arg, "--nthreads") == 0) { handle_mode_threads(i, argc, argv); }
         else {
             fprintf(
                 stderr,

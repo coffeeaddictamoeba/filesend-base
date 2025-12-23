@@ -90,11 +90,12 @@ public:
     bool send_files_from_path(const fs::path& path);
 
 #ifdef USE_MULTITHREADING
-    bool send_files_from_path_mt(const fs::path& p);
+    bool send_files_from_path_mt(const fs::path& p, int nthreads);
 
     bool send_files_from_path_mt(
-        const fs::path& p, 
-        std::chrono::seconds timeout
+        const fs::path& p,
+        std::chrono::seconds timeout,
+        int nthreads
     );
 #endif
 
