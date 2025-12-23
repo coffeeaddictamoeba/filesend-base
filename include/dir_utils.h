@@ -51,6 +51,8 @@ public:
 
     std::string get_name_timestamped() const;
 
+    std::vector<std::string> get_pending_filenames() const { return pending; }
+
     size_t qsize() const { return pending.size(); }
 
     bool compress(

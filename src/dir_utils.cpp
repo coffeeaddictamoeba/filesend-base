@@ -211,85 +211,63 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
     return true;
 }
 
-// NEEDS TO BE FIXED
 bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::string>* processed) {
-    const std::string ps = p.empty() ? std::string() : p.string();
+    if (!batch_->ready) {
+        const std::string ps = p.string();
 
-    // if (!batch_->ready) {
-    //     if (!ps.empty()) {
-    //         if (processed) {
-    //             if (processed->count(ps)) return true;
-    //             processed->insert(ps);
-    //         }
+        if (processed) {
+            if (processed->count(ps)) return true;
+            processed->insert(ps);
+        }
 
-    //         bool claimed = false;
-    //         if (db_) {
-    //             if (!db_->try_begin(ps)) {
-    //                 fprintf(
-    //                     stdout, 
-    //                     "[INFO] DB: Skipping already sent in batch: %s\n", p.c_str()
-    //                 );
-    //                 return true;
-    //             }
-    //             claimed = true;
-    //         }
+        if (db_ && !db_->try_begin(ps)) {
+            fprintf(
+                stdout, 
+                "[INFO] DB: Skipping already sent file in batch: %s\n", ps.c_str()
+            );
+            return true;
+        }
 
-    //         batch_->add(ps);
-    //         if (claimed) batch_claimed_.push_back(ps);
+        batch_->add(ps);
+    }
 
-    //         std::fprintf(
-    //             stdout,
-    //             "[INFO] Batch N%d: adding file %s (queue size: %zu)\n",
-    //             batch_->get_id(), p.c_str(), batch_->qsize()
-    //         );
-    //     }
-    // }
+    if (!batch_->ready) return true;
 
-    // // стадия отправки батча
-    // if (batch_->ready) {
-    //     std::string archive = batch_->get_name_timestamped();
+    const std::string archive = batch_->get_name_timestamped();
+    const auto pending = batch_->get_pending_filenames();
 
-    //     if (!batch_->compress(archive, batch_->format)) {
-    //         std::fprintf(stderr, RED "[ERROR] Compression failed in batch %s\n" RESET, archive.c_str());
+    if (!batch_->compress(archive, batch_->format)) {
+        fprintf(stderr, "[ERROR] Batch compress failed\n");
 
-    //         if (db_) {
-    //             for (const auto& f : batch_claimed_) db_->rollback(f);
-    //         }
-    //         batch_claimed_.clear();
+        if (db_) for (const auto& f : pending) db_->rollback(f);
 
-    //         batch_->clear();
-    //         return false;
-    //     }
+        batch_->clear();
+        return false;
+    }
 
-    //     // отправляем архив как обычный файл
-    //     bool ok = process_one_file(fs::path(archive), nullptr);
+    if (!process_one_file(fs::path(archive), nullptr)) {
+        fprintf(stderr, "[ERROR] Batch send failed\n");
 
-    //     if (!ok) {
-    //         std::fprintf(stderr, RED "[ERROR] Failed to send batch archive %s\n" RESET, archive.c_str());
-    //         if (db_) {
-    //             for (const auto& f : batch_claimed_) db_->rollback(f);
-    //         }
-    //         batch_claimed_.clear();
+        if (db_) for (const auto& f : pending) db_->rollback(f);
 
-    //         batch_->clear();
-    //         return false;
-    //     }
+        batch_->clear();
+        return false;
+    }
 
-    //     // архив ушёл — коммитим исходные файлы
-    //     if (db_) {
-    //         for (const auto& f : batch_claimed_) {
-    //             if (!db_->commit(f)) {
-    //                 std::fprintf(stderr, "[WARN] DB commit false for %s (changed during batch?)\n", f.c_str());
-    //             }
-    //         }
-    //     }
-    //     batch_claimed_.clear();
+    if (db_) {
+        for (const auto& f : pending) {
+            if (!db_->commit(f)) {
+                fprintf(
+                    stderr, 
+                    "[WARN] DB commit false for %s\n", f.c_str()
+                );
+            }
+        }
+        db_->flush();
+    }
 
-    //     std::fprintf(stdout, "[INFO] Sent batch archive: %s\n", archive.c_str());
-
-    //     batch_->increment_id();
-    //     batch_->clear();
-    // }
+    batch_->increment_id();
+    batch_->clear();
 
     return true;
 }
