@@ -166,6 +166,8 @@ void ArgParser::handle_mode_threads(int& value, int argc, char** argv) {
         YELLOW "[WARN] Program was compiled without support for multithreading. "
         "To enable it, compile with \"-DUSE_MULTITHREADING\"\n" RESET
     );
+
+    if (value + 1 < argc) (void)argv[++value]; // consume the next argument
 #endif
 }
 

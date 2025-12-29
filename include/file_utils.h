@@ -4,6 +4,11 @@
 #include <cstddef>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/file.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdexcept>
+#include <string>
 
 #include <sodium/crypto_hash_sha256.h>
 #include <sodium/crypto_secretstream_xchacha20poly1305.h>
@@ -19,6 +24,36 @@
 #define ENC_FLAG_RESERVED1  (1u << 3)
 #define ENC_FLAG_RESERVED2  (1u << 4)
 
+struct locked_fd {
+    int fd = -1;
+
+    explicit locked_fd(const char* path, int flag) {
+        fd = open(path, flag);
+
+        if (fd < 0) {
+            fprintf(
+                stderr, 
+                "[ERROR] open failed on lock for %s", path
+            );
+        }
+
+        if (flock(fd, LOCK_EX) != 0) {
+            fprintf(
+                stderr, 
+                "[ERROR] flock failed for %s", path
+            );
+            close(fd);
+            fd = -1;
+        }
+    }
+
+    ~locked_fd() { if (fd >= 0) close(fd); } // close releases flock
+
+    locked_fd(const locked_fd&) = delete;
+
+    locked_fd& operator=(const locked_fd&) = delete;
+};
+
 typedef struct {
     uint64_t size;
     uint64_t mtime;
@@ -33,10 +68,24 @@ int match_pattern(
 );
 
 // Integrity check
-int compute_file_sha256(const char *path, unsigned char out[crypto_hash_sha256_BYTES]);
-int compute_file_sha256_hex(const char *path, char *hex_out, size_t hex_out_len);
+int compute_file_sha256(
+    const char *path, 
+    unsigned char out[crypto_hash_sha256_BYTES]
+);
 
-// Encryption/decryption
+int compute_file_sha256_hex(
+    const char *path, 
+    char *hex_out, 
+    size_t hex_out_len
+);
+
+int verify_file_checksum(
+    const char* file_path,
+    const char* sha,
+    size_t sha_len
+);
+
+// Encryption/decryption (plain)
 int encrypt_file_symmetric(
     const unsigned char* key, 
     const char* plain_path, 
@@ -66,10 +115,34 @@ int decrypt_file_asymmetric(
     int dec_all
 );
 
-int verify_file_checksum(
-    const char* file_path,
-    const char* sha,
-    size_t sha_len
+// Encryption/decryption (fd)
+int encrypt_file_symmetric_fd(
+    const unsigned char* key,
+    int in_fd,
+    const char* enc_path,
+    int enc_all
+);
+
+int decrypt_file_symmetric_fd(
+    const unsigned char* key,
+    int in_fd,
+    const char* dec_path,
+    int dec_all
+);
+
+int encrypt_file_asymmetric_fd(
+    const unsigned char* pub_key,
+    int in_fd,
+    const char* enc_path,
+    int enc_all
+);
+
+int decrypt_file_asymmetric_fd(
+    const unsigned char* pub_key, 
+    const unsigned char* pr_key,
+    int in_fd, 
+    const char* dec_path, 
+    int dec_all
 );
 
 #endif // FILE_UTILS_H

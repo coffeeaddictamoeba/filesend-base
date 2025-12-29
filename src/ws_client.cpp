@@ -135,6 +135,8 @@ void WsClient::close() {
 }
 
 int WsClient::send_file(const std::string& file_path, int max_attempts, uint32_t flags) {
+    (void)max_attempts; // fix later
+    
     if (!connected_) {
         if (connect() != 0) return -1;
     }

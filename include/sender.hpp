@@ -87,7 +87,7 @@ bool run_with_retries(const RetryPolicy& policy, const std::string& what, func&&
 }
 
 // encrypt in-place
-inline bool encrypt_in_place(const FilesendPolicy& policy, const std::string& file_path) {
+inline bool encrypt_in_place_fd(const FilesendPolicy& policy, int in_fd, const std::string& file_path) {
     if (!(policy.enc_p.flags & ENC_FLAG_ENABLED)) {
         fprintf(
             stderr, 
@@ -110,7 +110,7 @@ inline bool encrypt_in_place(const FilesendPolicy& policy, const std::string& fi
             return false;
         }
 
-        if (encrypt_file_symmetric(key, file_path.c_str(), file_path.c_str(), (policy.enc_p.flags & ENC_FLAG_ALL)) != 0) {
+        if (encrypt_file_symmetric_fd(key, in_fd, file_path.c_str(), (policy.enc_p.flags & ENC_FLAG_ALL)) != 0) {
             fprintf(
                 stderr,
                 "[ERROR] Failed to encrypt %s (symmetric)\n", file_path.c_str()
@@ -130,7 +130,7 @@ inline bool encrypt_in_place(const FilesendPolicy& policy, const std::string& fi
             return false;
         }
 
-        if (encrypt_file_asymmetric(pub_key, file_path.c_str(), file_path.c_str(), (policy.enc_p.flags & ENC_FLAG_ALL)) != 0) {
+        if (encrypt_file_asymmetric_fd(pub_key, in_fd, file_path.c_str(), (policy.enc_p.flags & ENC_FLAG_ALL)) != 0) {
             fprintf(
                 stderr,
                 "[ERROR] Failed to encrypt %s (asymmetric)\n", file_path.c_str()
@@ -140,4 +140,12 @@ inline bool encrypt_in_place(const FilesendPolicy& policy, const std::string& fi
     }
 
     return true;
+}
+
+inline bool encrypt_in_place(const FilesendPolicy& policy, const std::string& file_path) {
+    int fd = open(file_path.c_str(), O_RDONLY);
+    if (fd < 0) return -1;
+    int rc = encrypt_in_place_fd(policy, fd, file_path);
+    close(fd);
+    return rc;
 }

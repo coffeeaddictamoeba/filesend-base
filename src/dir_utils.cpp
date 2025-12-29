@@ -469,9 +469,17 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds
                     claimed = true;
                 }
 
-                if (!encrypt_in_place(sender_.get_policy(), path)) {
-                    fprintf(stderr, "[ERROR] Encryption failed for %s\n", path.c_str());
-                    if (db_ && claimed) db_->rollback(path);
+                try {
+                    locked_fd lock(path.c_str(), O_RDONLY);
+                    if (!encrypt_in_place_fd(sender_.get_policy(), lock.fd, path)) {
+                        fprintf(stderr, "[ERROR] Encryption failed for %s\n", path.c_str());
+                        if (db_ && claimed) db_->rollback(path);
+                        had_error = true;
+                        processed.add(path);
+                        continue;
+                    }
+                } catch (...) {
+                    if (db_) db_->rollback(path);
                     had_error = true;
                     processed.add(path);
                     continue;

@@ -54,17 +54,12 @@ int match_pattern(const char* p, const char* t) {
     return p_idx == p_len;
 }
 
-int get_file_metadata(const char* path, file_metadata_t* fmd) {
+int get_file_metadata(int fd, file_metadata_t* md) {
     struct stat st;
-    if (stat(path, &st) != 0) {
-        perror(RED "stat" RESET);
-        return -1;
-    }
-
-    fmd->size  = (uint64_t)st.st_size;
-    fmd->mtime = (uint64_t)st.st_mtime;
-    fmd->pmode = (uint32_t)st.st_mode;
-
+    if (fstat(fd, &st) != 0) return -1;
+    md->size  = (uint64_t)st.st_size;
+    md->mtime = (uint64_t)st.st_mtime;
+    md->pmode = (uint32_t)st.st_mode;
     return 0;
 }
 
@@ -195,9 +190,17 @@ int verify_file_checksum(const char* file_path, const char* sha_received, size_t
 }
 
 int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, const char* enc_path, int enc_all) {
-    FILE* fin = fopen(plain_path, "rb");
+    int fd = open(plain_path, O_RDONLY);
+    if (fd < 0) return -1;
+    int rc = encrypt_file_symmetric_fd(key, fd, enc_path, enc_all);
+    close(fd);
+    return rc;
+}
+
+int encrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* enc_path, int enc_all) {
+    FILE* fin = fdopen(in_fd, "rb");
     if (!fin) {
-        perror(RED "fopen plain_path in file encrypt" RESET);
+        perror(RED "fopen in_fd in file encrypt" RESET);
         return -1;
     }
 
@@ -211,11 +214,11 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
         return -1;
     }
 
-    file_metadata_t md = {};
+    file_metadata_t md{};
     int have_md = 0;
-    if (get_file_metadata(plain_path, &md) == 0) {
-        have_md = 1;
-    } else {
+
+    if (get_file_metadata(in_fd, &md) == 0) { have_md = 1; } 
+    else {
         fprintf(
             stderr,
             RED "[WARN] Failed to get file metadata, continuing without\n" RESET
@@ -246,8 +249,8 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
     }
 
     unsigned long long out_len;
-    // Optionally encrypt metadata as first chunk
-    if (enc_all && have_md) {
+
+    if (enc_all && have_md) { // Optionally encrypt metadata as first chunk
         unsigned char meta_ct[sizeof(file_metadata_t) + crypto_secretstream_xchacha20poly1305_ABYTES];
 
         if (crypto_secretstream_xchacha20poly1305_push(&st, meta_ct, &out_len, (unsigned char*)&md, sizeof(md), NULL, 0, crypto_secretstream_xchacha20poly1305_TAG_MESSAGE) != 0) {
@@ -332,9 +335,17 @@ int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, con
 }
 
 int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const char* dec_path, int dec_all) {
-    FILE* fin = fopen(enc_path, "rb");
+    int fd = open(enc_path, O_RDONLY);
+    if (fd < 0) return -1;
+    int rc = decrypt_file_symmetric_fd(key, fd, dec_path, dec_all);
+    close(fd);
+    return rc;
+}
+
+int decrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* dec_path, int dec_all) {
+    FILE* fin = fdopen(in_fd, "rb");
     if (!fin) {
-        perror(RED "fopen of enc_path in decrypt file" RESET);
+        perror(RED "fopen of in_fd in decrypt file" RESET);
         return -1;
     }
 
@@ -377,7 +388,7 @@ int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const
         return -1;
     }
 
-    file_metadata_t md = {};
+    file_metadata_t md{};
     int have_md = 0;
 
     if (dec_all) {
@@ -494,9 +505,17 @@ int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const
 }
 
 int encrypt_file_asymmetric(const unsigned char* pub_key, const char* plain_path, const char* enc_path, int enc_all) {
-    FILE* fin = fopen(plain_path, "rb");
+    int fd = open(plain_path, O_RDONLY);
+    if (fd < 0) return -1;
+    int rc = encrypt_file_asymmetric_fd(pub_key, fd, enc_path, enc_all);
+    close(fd);
+    return rc;
+}
+
+int encrypt_file_asymmetric_fd(const unsigned char* pub_key, int in_fd, const char* enc_path, int enc_all) {
+    FILE* fin = fdopen(in_fd, "rb");
     if (!fin) {
-        perror(RED "fopen plain_path in file encrypt" RESET);
+        perror(RED "fopen in_fd in file encrypt" RESET);
         return -1;
     }
 
@@ -530,16 +549,14 @@ int encrypt_file_asymmetric(const unsigned char* pub_key, const char* plain_path
         return -1;
     }
 
-    // Get metadata (always)
     file_metadata_t md = {};
-    if (get_file_metadata(plain_path, &md) != 0) {
+    if (get_file_metadata(in_fd, &md) != 0) {
         fputs(RED "[ERROR] Failed to get file metadata\n" RESET, stderr);
         fclose(fin);
         fclose(fout);
         return -1;
     }
 
-    // Init secretstream
     crypto_secretstream_xchacha20poly1305_state st;
     unsigned char header[crypto_secretstream_xchacha20poly1305_HEADERBYTES];
 
@@ -559,8 +576,7 @@ int encrypt_file_asymmetric(const unsigned char* pub_key, const char* plain_path
 
     unsigned long long out_len;
 
-    // Optionally encrypt metadata as first chunk
-    if (enc_all) {
+    if (enc_all) { // Optionally encrypt metadata as first chunk
         unsigned char meta_ct[sizeof(file_metadata_t) + crypto_secretstream_xchacha20poly1305_ABYTES];
 
         if (crypto_secretstream_xchacha20poly1305_push(
@@ -647,7 +663,15 @@ int encrypt_file_asymmetric(const unsigned char* pub_key, const char* plain_path
 }
 
 int decrypt_file_asymmetric(const unsigned char* pub_key, const unsigned char* pr_key, const char* enc_path, const char* dec_path, int dec_all) {
-    FILE *fin = fopen(enc_path, "rb");
+    int fd = open(enc_path, O_RDONLY);
+    if (fd < 0) return -1;
+    int rc = decrypt_file_asymmetric_fd(pub_key, pr_key, fd, dec_path, dec_all);
+    close(fd);
+    return rc;
+}
+
+int decrypt_file_asymmetric_fd(const unsigned char* pub_key, const unsigned char* pr_key, int in_fd, const char* dec_path, int dec_all) {
+    FILE *fin = fdopen(in_fd, "rb");
     if (!fin) {
         perror("fopen encrypted input");
         return -1;
