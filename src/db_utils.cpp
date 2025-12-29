@@ -123,7 +123,7 @@ db_entry_t& SentFileDatabase::get_or_create_(const std::string& path) {
     return entries_.back();
 }
 
-bool SentFileDatabase::ensure_up_to_date_(db_entry_t& e, std::uint64_t mtime, std::uint64_t size) {
+bool SentFileDatabase::ensure_up_to_date_(db_entry_t& e, uint64_t mtime, uint64_t size) {
     if (e.mtime == mtime && e.size == size) return true;
 
     if (e.state == db_entry_t::state_t::inflight) {
@@ -136,7 +136,6 @@ bool SentFileDatabase::ensure_up_to_date_(db_entry_t& e, std::uint64_t mtime, st
     // file changed -> treat as new
     e.mtime = mtime;
     e.size  = size;
-    e.state = db_entry_t::state_t::none;
     dirty_ = true;
 
     return true;
@@ -149,18 +148,19 @@ bool SentFileDatabase::try_begin(const std::string& path) {
     std::lock_guard<std::mutex> lk(mu_);
 #endif
 
-    std::uint64_t mtime = 0, size = 0;
+    uint64_t mtime = 0, size = 0;
     if (!stat_file(path, mtime, size)) {
         return false;
     }
 
     db_entry_t& e = get_or_create_(path);
-    ensure_up_to_date_(e, mtime, size);
 
-    if (e.state == db_entry_t::state_t::sent)     return false;
+    if (e.state == db_entry_t::state_t::sent && e.mtime == mtime && e.size == size) return false;
     if (e.state == db_entry_t::state_t::inflight) return false;
 
     // claim
+    e.mtime = mtime;
+    e.size  = size;
     e.state = db_entry_t::state_t::inflight;
     dirty_ = true;
 
@@ -171,28 +171,14 @@ bool SentFileDatabase::commit(const std::string& path) {
 #ifdef USE_MULTITHREADING
     std::lock_guard<std::mutex> lk(mu_);
 #endif
-    auto it = idx_by_path_.find(path);
-    if (it == idx_by_path_.end()) {
-        return false;
+    db_entry_t& e = get_or_create_(path);
+    if (e.state != db_entry_t::state_t::inflight) return false;
+
+    uint64_t mtime = 0, size = 0;
+    if (stat_file(path, mtime, size)) {
+        e.mtime = mtime;
+        e.size  = size;
     }
-
-    db_entry_t& e = entries_[it->second];
-
-    // commit for inflight only
-    if (e.state != db_entry_t::state_t::inflight) {
-        return false;
-    }
-
-    std::uint64_t mtime = 0, size = 0;
-    if (!stat_file(path, mtime, size)) {
-        e.state = db_entry_t::state_t::sent;
-        dirty_ = true;
-        return true;
-    }
-
-    // in-place encrypt/send could change mtime/size - this is ok
-    e.mtime = mtime;
-    e.size  = size;
     e.state = db_entry_t::state_t::sent;
     dirty_ = true;
 

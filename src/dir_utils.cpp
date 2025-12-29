@@ -377,13 +377,13 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
 
                 // If DB is NOT needed on server, comment
                 if (db_ && !db_->get_path().empty()) {
-                    if (!encrypt_in_place(sender_.get_policy(), db_->get_path())) {
-                        fprintf(
-                            stderr,
-                            RED "[ERROR] DB: Encryption failed for %s\n" RESET, db_->get_path().c_str()
-                        );
-                        return false;
-                    }
+                    // if (!encrypt_in_place(sender_.get_policy(), db_->get_path())) { // do we need sent DB encryption?
+                    //     fprintf(
+                    //         stderr,
+                    //         RED "[ERROR] DB: Encryption failed for %s\n" RESET, db_->get_path().c_str()
+                    //     );
+                    //     return false;
+                    // }
                     sender_.send_file(db_->get_path());
                 }
 
@@ -547,14 +547,14 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds
 
     if (db_ && !db_->get_path().empty()) {
         const std::string dbp = db_->get_path();
-        if (!encrypt_in_place(sender_.get_policy(), dbp)) {
-            fprintf(
-                stderr, 
-                RED "[ERROR] DB: Encryption failed for %s\n" RESET, dbp.c_str()
-            );
-            sender_.send_end();
-            return false;
-        }
+        // if (!encrypt_in_place(sender_.get_policy(), dbp)) {
+        //     fprintf(
+        //         stderr, 
+        //         RED "[ERROR] DB: Encryption failed for %s\n" RESET, dbp.c_str()
+        //     );
+        //     sender_.send_end();
+        //     return false;
+        // }
         sender_.send_file(dbp);
     }
 
