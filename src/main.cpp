@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
 
         return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 
-    } else if (strcmp(cf.mode.c_str(), "verify") == 0) { // supports raw (32-bit) and hex (64-bit) SHA256; this code uses the latter as default
+    } else if (strcmp(cf.mode.c_str(), "verify") == 0) { // supports raw (32-byte) and hex (64-byte) SHA256; this code uses the latter as default
         const char* sha_received = argv[3];
         return verify_file_checksum(
             cf.init_path.c_str(), 

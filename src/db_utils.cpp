@@ -39,7 +39,7 @@ SentFileDatabase::SentFileDatabase(const std::string& db_path) {
     );
 }
 
-bool SentFileDatabase::serialize(std::ostream& out, const db_entry_t& e) const {
+bool SentFileDatabase::serialize(std::ostream& out, const DatabaseEntry& e) const {
     std::uint32_t len = static_cast<std::uint32_t>(e.file_path.size());
     out.write(reinterpret_cast<const char*>(&len), 4);
     out.write(e.file_path.data(), len);
@@ -52,7 +52,7 @@ bool SentFileDatabase::serialize(std::ostream& out, const db_entry_t& e) const {
     return out.good();
 }
 
-bool SentFileDatabase::deserialize(std::istream& in, db_entry_t& e) {
+bool SentFileDatabase::deserialize(std::istream& in, DatabaseEntry& e) {
     std::uint32_t len = 0;
     if (!in.read(reinterpret_cast<char*>(&len), 4)) return false;
 
@@ -65,10 +65,10 @@ bool SentFileDatabase::deserialize(std::istream& in, db_entry_t& e) {
     std::uint8_t st = 0;
     if (!in.read(reinterpret_cast<char*>(&st), 1)) return false;
 
-    if (st > static_cast<std::uint8_t>(db_entry_t::state_t::sent)) {
-        e.state = db_entry_t::state_t::none; // corrupt / old format
+    if (st > static_cast<std::uint8_t>(DatabaseEntry::state_t::sent)) {
+        e.state = DatabaseEntry::state_t::none; // corrupt / old format
     } else {
-        e.state = static_cast<db_entry_t::state_t>(st);
+        e.state = static_cast<DatabaseEntry::state_t>(st);
     }
 
     return true;
@@ -96,7 +96,7 @@ bool SentFileDatabase::load() {
     std::ifstream in(db_path_, std::ios::binary);
     if (!in.is_open()) return true; // no db yet
 
-    db_entry_t e;
+    DatabaseEntry e;
     while(deserialize(in, e)) {
         idx_by_path_[e.file_path] = entries_.size();
         entries_.push_back(std::move(e));
@@ -105,17 +105,17 @@ bool SentFileDatabase::load() {
     return true;
 }
 
-db_entry_t& SentFileDatabase::get_or_create_(const std::string& path) {
+DatabaseEntry& SentFileDatabase::get_or_create_(const std::string& path) {
     auto it = idx_by_path_.find(path);
     if (it != idx_by_path_.end()) {
         return entries_[it->second];
     }
 
-    db_entry_t e;
+    DatabaseEntry e;
     e.file_path = path;
     e.mtime = 0;
     e.size  = 0;
-    e.state = db_entry_t::state_t::none;
+    e.state = DatabaseEntry::state_t::none;
 
     idx_by_path_[path] = entries_.size();
     entries_.push_back(std::move(e));
@@ -123,10 +123,10 @@ db_entry_t& SentFileDatabase::get_or_create_(const std::string& path) {
     return entries_.back();
 }
 
-bool SentFileDatabase::ensure_up_to_date_(db_entry_t& e, uint64_t mtime, uint64_t size) {
+bool SentFileDatabase::ensure_up_to_date_(DatabaseEntry& e, uint64_t mtime, uint64_t size) {
     if (e.mtime == mtime && e.size == size) return true;
 
-    if (e.state == db_entry_t::state_t::inflight) {
+    if (e.state == DatabaseEntry::state_t::inflight) {
         e.mtime = mtime;
         e.size  = size;
         dirty_ = true;
@@ -153,15 +153,15 @@ bool SentFileDatabase::try_begin(const std::string& path) {
         return false;
     }
 
-    db_entry_t& e = get_or_create_(path);
+    DatabaseEntry& e = get_or_create_(path);
 
-    if (e.state == db_entry_t::state_t::sent && e.mtime == mtime && e.size == size) return false;
-    if (e.state == db_entry_t::state_t::inflight) return false;
+    if (e.state == DatabaseEntry::state_t::sent && e.mtime == mtime && e.size == size) return false;
+    if (e.state == DatabaseEntry::state_t::inflight) return false;
 
     // claim
     e.mtime = mtime;
     e.size  = size;
-    e.state = db_entry_t::state_t::inflight;
+    e.state = DatabaseEntry::state_t::inflight;
     dirty_ = true;
 
     return true;
@@ -171,15 +171,15 @@ bool SentFileDatabase::commit(const std::string& path) {
 #ifdef USE_MULTITHREADING
     std::lock_guard<std::mutex> lk(mu_);
 #endif
-    db_entry_t& e = get_or_create_(path);
-    if (e.state != db_entry_t::state_t::inflight) return false;
+    DatabaseEntry& e = get_or_create_(path);
+    if (e.state != DatabaseEntry::state_t::inflight) return false;
 
     uint64_t mtime = 0, size = 0;
     if (stat_file(path, mtime, size)) {
         e.mtime = mtime;
         e.size  = size;
     }
-    e.state = db_entry_t::state_t::sent;
+    e.state = DatabaseEntry::state_t::sent;
     dirty_ = true;
 
     return true;
@@ -192,9 +192,9 @@ void SentFileDatabase::rollback(const std::string& path) {
     auto it = idx_by_path_.find(path);
     if (it == idx_by_path_.end()) return;
 
-    db_entry_t& e = entries_[it->second];
-    if (e.state == db_entry_t::state_t::inflight) {
-        e.state = db_entry_t::state_t::none;
+    DatabaseEntry& e = entries_[it->second];
+    if (e.state == DatabaseEntry::state_t::inflight) {
+        e.state = DatabaseEntry::state_t::none;
         dirty_ = true;
     }
 }

@@ -11,7 +11,7 @@
 #include "multithreading_utils.h"
 #endif
 
-struct db_entry_t {
+struct DatabaseEntry {
     std::string file_path;
     uint64_t mtime = 0;
     uint64_t size  = 0;
@@ -41,12 +41,12 @@ public:
 private:
     bool serialize(
         std::ostream& out,
-        const db_entry_t& e
+        const DatabaseEntry& e
     ) const;
 
     bool deserialize(
         std::istream& in,
-        db_entry_t& e
+        DatabaseEntry& e
     );
 
     static bool stat_file(
@@ -55,17 +55,17 @@ private:
         std::uint64_t& size
     );
 
-    db_entry_t& get_or_create_(const std::string& path);
+    DatabaseEntry& get_or_create_(const std::string& path);
 
     bool ensure_up_to_date_(
-        db_entry_t& e,
+        DatabaseEntry& e,
         std::uint64_t mtime,
         std::uint64_t size
     );
 
 private:
     std::string db_path_;
-    std::vector<db_entry_t> entries_;
+    std::vector<DatabaseEntry> entries_;
     std::unordered_map<std::string, std::size_t> idx_by_path_;
     bool dirty_ = false;
 

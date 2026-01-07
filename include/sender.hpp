@@ -29,19 +29,19 @@ struct RetryPolicy {
 
 // Encryption configuration
 struct EncryptionPolicy {
-    uint32_t flags{0};         // |Res|Res|All|Sym|Enc|
     std::string key_path;      // could be symmetric or public key path depending on flags
     std::string dec_key_path;  // only for decrypt
+    uint32_t flags{0};         // |Res|Res|All|Sym|Enc|
 };
 
 // Send configuration
 struct FilesendPolicy {
-    std::chrono::seconds timeout;
-    RetryPolicy retry_send;
-    RetryPolicy retry_connect;
     EncryptionPolicy enc_p;
     std::string cert_path;
     std::string url;
+    RetryPolicy retry_send;
+    RetryPolicy retry_connect;
+    std::chrono::seconds timeout;
 };
 
 class Sender {

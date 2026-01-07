@@ -53,6 +53,13 @@ void ArgParser::init_config() {
         PR_KEY_ENV, 
         DEFAULT_PR_KEY_PATH
     );
+
+    config_.policy.cert_path = getenv_or_default(
+        CERT_PATH_ENV, 
+        DEFAULT_CA_CERT_PATH
+    );
+
+    config_.policy.enc_p.key_path = "";
 }
 
 int ArgParser::parse(int argc, char** argv) {
@@ -208,10 +215,6 @@ void ArgParser::handle_send(int argc, char** argv) {
     }
 
     config_.policy.url = argv[4]; // URL
-    config_.policy.cert_path = getenv_or_default(
-        CERT_PATH_ENV, 
-        DEFAULT_CA_CERT_PATH
-    );
 
     for (int i = 5; i < argc; ++i) {
         const char* arg = argv[i];

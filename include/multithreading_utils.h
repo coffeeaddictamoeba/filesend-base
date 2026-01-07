@@ -27,7 +27,8 @@ public:
         std::lock_guard<std::mutex> lk(m_);
         set_.insert(s);
     }
-    bool empty() { return set_.empty(); }
+    bool empty() const { return set_.empty(); }
+
 private:
     std::mutex m_;
     std::unordered_set<std::string> set_;
