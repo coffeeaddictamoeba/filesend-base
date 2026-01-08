@@ -69,7 +69,7 @@ def upload():
             "bin/./filesend",
             "verify",
             enc_path,
-            sha
+            sha_str
         ]
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
