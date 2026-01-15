@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <chrono>
 #include <functional>
@@ -31,7 +32,7 @@ struct RetryPolicy {
 struct EncryptionPolicy {
     std::string key_path;      // could be symmetric or public key path depending on flags
     std::string dec_key_path;  // only for decrypt
-    uint32_t flags{0};         // |Res|Res|All|Sym|Enc|
+    uint32_t flags{0};         // |Res|Orig|All|Sym|Enc|
 };
 
 // Send configuration
@@ -42,6 +43,11 @@ struct FilesendPolicy {
     RetryPolicy retry_send;
     RetryPolicy retry_connect;
     std::chrono::seconds timeout;
+
+    bool is_encryption_needed()     const noexcept { return enc_p.flags & ENC_FLAG_ENABLED; }
+    bool is_encryption_symmetric()  const noexcept { return enc_p.flags & ENC_FLAG_SYMMETRIC; }
+    bool is_encryption_for_all()    const noexcept { return enc_p.flags & ENC_FLAG_ALL; }
+    bool is_encryption_in_place()   const noexcept { return !(enc_p.flags & ENC_FLAG_SAVE_ORIG); } // if orig file is saved, encryption is not "in-place"
 };
 
 class Sender {
@@ -50,7 +56,7 @@ public:
 
     virtual ~Sender() = default;
 
-    const FilesendPolicy& get_policy() const { return policy_; }
+    const FilesendPolicy& get_policy() const noexcept { return policy_; }
 
     // Send ONE file. Path may be already encrypted; flags tell server how to handle.
     virtual bool send_file(const std::string& file_path) = 0;
@@ -87,22 +93,26 @@ bool run_with_retries(const RetryPolicy& policy, const std::string& what, func&&
 }
 
 // encrypt in-place
-inline bool encrypt_in_place_fd(const FilesendPolicy& policy, int in_fd, const std::string& file_path) {
-    if (!(policy.enc_p.flags & ENC_FLAG_ENABLED)) {
-        fprintf(
-            stderr, 
-            "[INFO] No encryption policy provided. Sending plain file.\n"
-        );
+inline bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const std::string& file_path, const std::string& enc_file_path) {
+    if (file_path.empty()) return false;
+
+    if (!(policy.is_encryption_needed())) {
+        printf("[INFO] No encryption policy provided. Sending plain file.\n");
         return true;
     }
 
+    if (enc_file_path.empty()) return false;
+
+    const std::string enc_file_path_temp = enc_file_path + ".tmp";
+
     const char* key_path = policy.enc_p.key_path.empty() ? nullptr : policy.enc_p.key_path.c_str();
 
-    if (policy.enc_p.flags & ENC_FLAG_SYMMETRIC) {
+    // SYMMETRIC ENCRYPTION
+    if (policy.is_encryption_symmetric()) {
         const char* p = key_path ? key_path : DEFAULT_SYM_KEY_PATH;
 
         unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
-        if (load_or_create_symmetric_key(p, key, sizeof(key)) != 0) {
+        if (load_or_create_symmetric_key(p, key, sizeof key) != 0) {
             fprintf(
                 stderr, 
                 "[ERROR] Failed to load/create symmetric key\n"
@@ -110,19 +120,21 @@ inline bool encrypt_in_place_fd(const FilesendPolicy& policy, int in_fd, const s
             return false;
         }
 
-        if (encrypt_file_symmetric_fd(key, in_fd, file_path.c_str(), (policy.enc_p.flags & ENC_FLAG_ALL)) != 0) {
+        if (encrypt_file_symmetric_fd(key, in_fd, enc_file_path_temp.c_str(), policy.enc_p.flags) != 0) {
             fprintf(
                 stderr,
                 "[ERROR] Failed to encrypt %s (symmetric)\n", file_path.c_str()
             );
             return false;
         }
-    } else {
-        const char* pub = key_path ? key_path : DEFAULT_PUB_KEY_PATH;
+
+    } else { // ASYMMETRIC ENCRYPTION
+
         const char* pr  = DEFAULT_PR_KEY_PATH; // dummy for keypair creation
+        const char* pub = key_path ? key_path : DEFAULT_PUB_KEY_PATH;
 
         unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
-        if (load_or_create_asymmetric_key_pair(pub, pr, pub_key, sizeof(pub_key)) != 0) {
+        if (load_or_create_asymmetric_key_pair(pub, pr, pub_key, sizeof pub_key) != 0) {
             fprintf(
                 stderr, 
                 "[ERROR] Failed to load/create asymmetric key\n"
@@ -130,7 +142,7 @@ inline bool encrypt_in_place_fd(const FilesendPolicy& policy, int in_fd, const s
             return false;
         }
 
-        if (encrypt_file_asymmetric_fd(pub_key, in_fd, file_path.c_str(), (policy.enc_p.flags & ENC_FLAG_ALL)) != 0) {
+        if (encrypt_file_asymmetric_fd(pub_key, in_fd, enc_file_path_temp.c_str(), policy.enc_p.flags) != 0) {
             fprintf(
                 stderr,
                 "[ERROR] Failed to encrypt %s (asymmetric)\n", file_path.c_str()
@@ -139,13 +151,20 @@ inline bool encrypt_in_place_fd(const FilesendPolicy& policy, int in_fd, const s
         }
     }
 
+    if (rename(enc_file_path_temp.c_str(), enc_file_path.c_str()) != 0) {
+        perror("rename in encrypt_to_path_fd");
+        return false;
+    }
+
+    if (policy.is_encryption_in_place()) remove(file_path.c_str()); // leave only encrypted version
+
     return true;
 }
 
-inline bool encrypt_in_place(const FilesendPolicy& policy, const std::string& file_path) {
+inline bool encrypt_to_path(const FilesendPolicy& policy, const std::string& file_path, const std::string& enc_file_path) {
     int fd = open(file_path.c_str(), O_RDONLY);
     if (fd < 0) return -1;
-    int rc = encrypt_in_place_fd(policy, fd, file_path);
+    int rc = encrypt_to_path_fd(policy, fd, file_path, enc_file_path);
     close(fd);
     return rc;
 }

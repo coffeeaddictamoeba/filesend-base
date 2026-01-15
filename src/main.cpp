@@ -93,13 +93,13 @@ int main(int argc, char** argv) {
     }
 
     // ENCRYPT / DECRYPT MODES
-    bool on_all = (cf.policy.enc_p.flags & ENC_FLAG_ALL);
+    auto flags = cf.policy.enc_p.flags;
 
-    if (cf.policy.enc_p.flags & ENC_FLAG_SYMMETRIC) { // SYMMETRIC
+    if (flags & ENC_FLAG_SYMMETRIC) { // SYMMETRIC
         unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
 
         if (strcmp(cf.mode.c_str(), "decrypt") != 0) { // ENCRYPT
-            if (load_or_create_symmetric_key(cf.policy.enc_p.key_path.c_str(), key, sizeof(key)) != 0) {
+            if (load_or_create_symmetric_key(cf.policy.enc_p.key_path.c_str(), key, sizeof key) != 0) {
                 fprintf(
                     stderr,
                     RED "[ERROR] Failed to create/load symmetric key\n" RESET
@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
                     key, 
                     src.c_str(), 
                     dest.c_str(), 
-                    on_all
+                    flags
                 );
             };
 
@@ -120,8 +120,8 @@ int main(int argc, char** argv) {
 
         } else { // DECRYPT
 
-            if (load_key(cf.policy.enc_p.key_path.c_str(), key, sizeof(key)) != 0) {
-                std::fprintf(
+            if (load_key(cf.policy.enc_p.key_path.c_str(), key, sizeof key) != 0) {
+                fprintf(
                     stderr,
                     RED "[ERROR] Failed to load asymmetric key pair\n" RESET
                 );
@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
                     key,
                     src.c_str(),
                     dest.c_str(),
-                    on_all
+                    flags
                 );
             };
 
@@ -150,7 +150,8 @@ int main(int argc, char** argv) {
                     cf.policy.enc_p.key_path.c_str(),
                     cf.policy.enc_p.dec_key_path.c_str(),
                     pub_key,
-                    sizeof(pub_key)) != 0) {
+                    sizeof pub_key) != 0) 
+            {
                 fprintf(
                     stderr,
                     RED "[ERROR] Failed to create/load asymmetric key\n" RESET
@@ -163,7 +164,7 @@ int main(int argc, char** argv) {
                     pub_key,
                     src.c_str(),
                     dest.c_str(),
-                    on_all
+                    flags
                 );
             };
 
@@ -172,7 +173,7 @@ int main(int argc, char** argv) {
         } else { // DECRYPT
             if (load_key(cf.policy.enc_p.key_path.c_str(), pub_key, sizeof(pub_key))     != 0 ||
                 load_key(cf.policy.enc_p.dec_key_path.c_str(), pr_key,  sizeof(pr_key))  != 0) {
-                std::fprintf(
+                fprintf(
                     stderr,
                     RED "[ERROR] Failed to load asymmetric key pair\n" RESET
                 );
@@ -185,18 +186,17 @@ int main(int argc, char** argv) {
                     pr_key,
                     src.c_str(),
                     dest.c_str(),
-                    on_all
+                    flags
                 );
             };
+
+            // NEEDS TO BE AUTOMATED IN CASE WHEN WE GET .enc FILES
 
             return (process_path(cf.init_path, cf.dest_path, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
     }
 
-    fprintf(
-        stderr, 
-        RED "[ERROR] Wrong arguments specified\n" RESET
-    );
+    fprintf(stderr, RED "[ERROR] Wrong arguments specified\n" RESET);
 
     return EXIT_FAILURE;
 }

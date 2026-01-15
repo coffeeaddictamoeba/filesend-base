@@ -16,7 +16,7 @@ struct DatabaseEntry {
     uint64_t mtime = 0;
     uint64_t size  = 0;
 
-    enum class state_t : std::uint8_t {
+    enum class state_t : uint8_t {
         none = 0,
         inflight = 1,
         sent = 2
@@ -51,16 +51,16 @@ private:
 
     static bool stat_file(
         const std::string& file_path,
-        std::uint64_t& mtime,
-        std::uint64_t& size
+        uint64_t& mtime,
+        uint64_t& size
     );
 
     DatabaseEntry& get_or_create_(const std::string& path);
 
     bool ensure_up_to_date_(
         DatabaseEntry& e,
-        std::uint64_t mtime,
-        std::uint64_t size
+        uint64_t mtime,
+        uint64_t size
     );
 
 private:

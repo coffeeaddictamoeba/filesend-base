@@ -40,47 +40,43 @@ SentFileDatabase::SentFileDatabase(const std::string& db_path) {
 }
 
 bool SentFileDatabase::serialize(std::ostream& out, const DatabaseEntry& e) const {
-    std::uint32_t len = static_cast<std::uint32_t>(e.file_path.size());
+    uint32_t len = static_cast<uint32_t>(e.file_path.size());
     out.write(reinterpret_cast<const char*>(&len), 4);
     out.write(e.file_path.data(), len);
     out.write(reinterpret_cast<const char*>(&e.mtime), 8);
     out.write(reinterpret_cast<const char*>(&e.size), 8);
 
-    std::uint8_t st = static_cast<std::uint8_t>(e.state);
+    uint8_t st = static_cast<uint8_t>(e.state);
     out.write(reinterpret_cast<const char*>(&st), 1);
 
     return out.good();
 }
 
 bool SentFileDatabase::deserialize(std::istream& in, DatabaseEntry& e) {
-    std::uint32_t len = 0;
+    uint32_t len = 0;
     if (!in.read(reinterpret_cast<char*>(&len), 4)) return false;
 
     e.file_path.resize(len);
     if (!in.read(e.file_path.data(), len)) return false;
 
     if (!in.read(reinterpret_cast<char*>(&e.mtime), 8)) return false;
-    if (!in.read(reinterpret_cast<char*>(&e.size), 8)) return false;
+    if (!in.read(reinterpret_cast<char*>(&e.size),  8)) return false;
 
-    std::uint8_t st = 0;
+    uint8_t st = 0;
     if (!in.read(reinterpret_cast<char*>(&st), 1)) return false;
 
-    if (st > static_cast<std::uint8_t>(DatabaseEntry::state_t::sent)) {
-        e.state = DatabaseEntry::state_t::none; // corrupt / old format
-    } else {
-        e.state = static_cast<DatabaseEntry::state_t>(st);
-    }
+    e.state = st > static_cast<uint8_t>(DatabaseEntry::state_t::sent)
+        ? DatabaseEntry::state_t::none // corrupt / old format
+        : static_cast<DatabaseEntry::state_t>(st);
 
     return true;
 }
 
  bool SentFileDatabase::stat_file(const std::string& file_path, uint64_t& mtime, uint64_t& size) {
     struct stat st;
-    if (::stat(file_path.c_str(), &st) != 0) {
-        return false;
-    }
-    mtime = static_cast<std::uint64_t>(st.st_mtime);
-    size  = static_cast<std::uint64_t>(st.st_size);
+    if (::stat(file_path.c_str(), &st) != 0) return false;
+    mtime = static_cast<uint64_t>(st.st_mtime);
+    size  = static_cast<uint64_t>(st.st_size);
     return true;
 }
 
@@ -149,9 +145,7 @@ bool SentFileDatabase::try_begin(const std::string& path) {
 #endif
 
     uint64_t mtime = 0, size = 0;
-    if (!stat_file(path, mtime, size)) {
-        return false;
-    }
+    if (!stat_file(path, mtime, size)) return false;
 
     DatabaseEntry& e = get_or_create_(path);
 
