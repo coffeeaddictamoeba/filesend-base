@@ -93,7 +93,7 @@ bool run_with_retries(const RetryPolicy& policy, const std::string& what, func&&
 }
 
 // encrypt in-place
-inline bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const std::string& file_path, const std::string& enc_file_path) {
+static bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const std::string& file_path, const std::string& enc_file_path) {
     if (file_path.empty()) return false;
 
     if (!(policy.is_encryption_needed())) {
@@ -113,18 +113,12 @@ inline bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const st
 
         unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
         if (load_or_create_symmetric_key(p, key, sizeof key) != 0) {
-            fprintf(
-                stderr, 
-                "[ERROR] Failed to load/create symmetric key\n"
-            );
+            fprintf(stderr, "[ERROR] Failed to load/create symmetric key\n");
             return false;
         }
 
-        if (encrypt_file_symmetric_fd(key, in_fd, enc_file_path_temp.c_str(), policy.enc_p.flags) != 0) {
-            fprintf(
-                stderr,
-                "[ERROR] Failed to encrypt %s (symmetric)\n", file_path.c_str()
-            );
+        if (encrypt_file_symmetric_fd(key, in_fd, enc_file_path_temp.c_str(), policy.is_encryption_for_all()) != 0) {
+            fprintf(stderr, "[ERROR] Failed to encrypt %s (symmetric)\n", file_path.c_str());
             return false;
         }
 
@@ -135,18 +129,12 @@ inline bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const st
 
         unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
         if (load_or_create_asymmetric_key_pair(pub, pr, pub_key, sizeof pub_key) != 0) {
-            fprintf(
-                stderr, 
-                "[ERROR] Failed to load/create asymmetric key\n"
-            );
+            fprintf(stderr,  "[ERROR] Failed to load/create asymmetric key\n");
             return false;
         }
 
-        if (encrypt_file_asymmetric_fd(pub_key, in_fd, enc_file_path_temp.c_str(), policy.enc_p.flags) != 0) {
-            fprintf(
-                stderr,
-                "[ERROR] Failed to encrypt %s (asymmetric)\n", file_path.c_str()
-            );
+        if (encrypt_file_asymmetric_fd(pub_key, in_fd, enc_file_path_temp.c_str(), policy.is_encryption_for_all()) != 0) {
+            fprintf(stderr, "[ERROR] Failed to encrypt %s (asymmetric)\n", file_path.c_str());
             return false;
         }
     }
@@ -161,7 +149,7 @@ inline bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const st
     return true;
 }
 
-inline bool encrypt_to_path(const FilesendPolicy& policy, const std::string& file_path, const std::string& enc_file_path) {
+static bool encrypt_to_path(const FilesendPolicy& policy, const std::string& file_path, const std::string& enc_file_path) {
     int fd = open(file_path.c_str(), O_RDONLY);
     if (fd < 0) return -1;
     int rc = encrypt_to_path_fd(policy, fd, file_path, enc_file_path);

@@ -3,7 +3,10 @@
 
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <sys/stat.h>
+#include <system_error>
 
 // Colorful logs.
 #define RESET   "\033[0m"
@@ -45,12 +48,32 @@ constexpr const char* COMPRESSION_FORMATS_AVAILABLE[] = {
     "tar.gz"
 };
 
+inline bool is_hidden_or_tmp(const std::string& name) {
+    if (name.empty() || name[0] == '.') return true;
+
+    constexpr const char* TEMP_EXTS[] = {
+        ".tmp",
+        ".temp",
+        "~",
+        ".part",
+        ".swp",
+    };
+
+    auto s = strlen(name.c_str());
+    for (auto ext : TEMP_EXTS) {
+        auto e = strlen(ext);
+        if (s >= e && name.compare(s-e, e, ext) == 0) return true;
+    }
+
+    return false;
+}
+
 inline const char* getenv_or_default(const char* env_name, const char* default_val) {
     const char* env = std::getenv(env_name);
     if (env) {
         return env;
     } else {
-        std::fprintf(
+        fprintf(
             stderr,
             YELLOW "[WARN] No %s found in environment. Using default: %s\n" RESET, env_name, default_val
         );

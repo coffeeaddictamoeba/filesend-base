@@ -93,9 +93,9 @@ int main(int argc, char** argv) {
     }
 
     // ENCRYPT / DECRYPT MODES
-    auto flags = cf.policy.enc_p.flags;
+    auto policy = cf.policy;
 
-    if (flags & ENC_FLAG_SYMMETRIC) { // SYMMETRIC
+    if (policy.is_encryption_symmetric()) { // SYMMETRIC
         unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
 
         if (strcmp(cf.mode.c_str(), "decrypt") != 0) { // ENCRYPT
@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
                     key, 
                     src.c_str(), 
                     dest.c_str(), 
-                    flags
+                    policy.is_encryption_for_all()
                 );
             };
 
@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
                     key,
                     src.c_str(),
                     dest.c_str(),
-                    flags
+                    policy.is_encryption_for_all()
                 );
             };
 
@@ -164,7 +164,7 @@ int main(int argc, char** argv) {
                     pub_key,
                     src.c_str(),
                     dest.c_str(),
-                    flags
+                    policy.is_encryption_for_all()
                 );
             };
 
@@ -186,7 +186,7 @@ int main(int argc, char** argv) {
                     pr_key,
                     src.c_str(),
                     dest.c_str(),
-                    flags
+                    policy.is_encryption_for_all()
                 );
             };
 

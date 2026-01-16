@@ -56,6 +56,20 @@ void WsClient::parse_url() {
     }
 }
 
+void WsClient::reset() {
+    beast::error_code ec;
+    try {
+        if (use_tls_) {
+            if (ws_tls_) ws_tls_->close(websocket::close_code::normal, ec);
+        } else {
+            if (ws_plain_) ws_plain_->close(websocket::close_code::normal, ec);
+        }
+    } catch (...) {}
+    ws_plain_.reset();
+    ws_tls_.reset();
+    connected_ = false;
+}
+
 int WsClient::connect_plain() {
     try {
         auto results = resolver_.resolve(host_, port_str_);
@@ -77,7 +91,7 @@ int WsClient::connect_plain() {
             stderr, 
             RED "[WS] connect_plain exception: %s\n" RESET, e.what()
         );
-        connected_ = false;
+        reset();
         return -1;
     }
 }
@@ -105,7 +119,7 @@ int WsClient::connect_tls() {
             stderr, 
             RED "[WS] connect_tls exception: %s\n" RESET, e.what()
         );
-        connected_ = false;
+        reset();
         return -1;
     }
 }
@@ -221,7 +235,7 @@ int WsClient::send_file(const std::string& file_path, int max_attempts, uint32_t
             stderr, 
             RED "[WS] send_file exception: %s\n" RESET, e.what()
         );
-        connected_ = false;
+        reset();
         return -1;
     }
 }
@@ -233,23 +247,13 @@ int WsClient::send_end() {
         if (use_tls_) {
             ws_tls_->text(true);
             ws_tls_->write(net::buffer(end_json));
-
-            beast::flat_buffer buffer;
-            ws_tls_->read(buffer);
         } else {
             ws_plain_->text(true);
             ws_plain_->write(net::buffer(end_json));
-
-            beast::flat_buffer buffer;
-            ws_plain_->read(buffer);
         }
         return 0;
-    } catch (const std::exception& e) {
-        fprintf(
-            stderr, 
-            RED "[WS] send_end exception: %s\n" RESET, e.what()
-        );
-        connected_ = false;
+    } catch (...) {
+        reset();
         return -1;
     }
 }

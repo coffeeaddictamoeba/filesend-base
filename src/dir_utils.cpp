@@ -6,6 +6,8 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <fstream>
+#include <atomic>
 #include <unordered_set>
 
 #include "../include/dir_utils.h"
@@ -173,7 +175,7 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
 
     bool claimed = false;
     if (db_) {
-        if (!db_->try_begin(ps)) {
+        if (!db_->claim(ps)) {
             fprintf(stdout, "[INFO] DB: Skipping already sent: %s\n", p.c_str());
             return true;
         }
@@ -204,10 +206,10 @@ bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::str
 
     if (db_ && claimed) { // we can store only one file as they are the same
         if (f == ps) {
-            db_->try_begin(f);
+            db_->claim(f);
             db_->commit(f);
         } else { // we need to store both filenames
-            db_->try_begin(f);
+            db_->claim(f);
             db_->commit(f);
             db_->commit(ps);
         }
@@ -225,7 +227,7 @@ bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::st
             processed->insert(ps);
         }
 
-        if (db_ && !db_->try_begin(ps)) {
+        if (db_ && !db_->claim(ps)) {
             fprintf(
                 stdout, 
                 "[INFO] DB: Skipping already sent file in batch: %s\n", ps.c_str()
@@ -382,13 +384,6 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
 
                 // If DB is NOT needed on server, comment
                 if (db_ && !db_->get_path().empty()) {
-                    // if (!encrypt_to_path(sender_.get_policy(), db_->get_path())) { // do we need sent DB encryption?
-                    //     fprintf(
-                    //         stderr,
-                    //         RED "[ERROR] DB: Encryption failed for %s\n" RESET, db_->get_path().c_str()
-                    //     );
-                    //     return false;
-                    // }
                     sender_.send_file(db_->get_path());
                 }
 
@@ -405,26 +400,6 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
 }
 
 #ifdef USE_MULTITHREADING
-static bool is_tmp(const std::string& p) noexcept { // needed to prevent race conditions on tmp files
-    if (p.empty() || p[0] == '.') return false;
-
-    constexpr const char* TEMP_EXTS[] = {
-        ".tmp",
-        ".temp"
-        "~",
-        ".part",
-        ".swp",
-    };
-
-    auto s = strlen(p.c_str());
-    for (auto ext : TEMP_EXTS) {
-        auto e = strlen(ext);
-        if (s >= e && p.compare(s-e, e, ext) == 0) return true;
-    }
-
-    return false;
-}
-
 bool FileSender::send_files_from_path_mt(const fs::path& p, int nthreads = MAX_WORKERS_MT) {
     return send_files_from_path_mt(p, sender_.get_policy().timeout, nthreads);
 }
@@ -474,15 +449,19 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds
     std::vector<std::thread> workers;
     workers.reserve(nthreads);
 
+    const auto policy = sender_.get_policy();
+    bool do_enc = policy.is_encryption_needed();
+
     for (int i = 0; i < nthreads; ++i) {
         workers.emplace_back([&, i] {
             std::string path;
+
             while (qe.pop(path)) {
                 if (processed.contains(path)) continue;
 
                 bool claimed = false;
                 if (db_) {
-                    if (!db_->try_begin(path)) {
+                    if (!db_->claim(path)) {
                         fprintf(stdout, "[INFO] DB: Skipping already sent: %s\n", path.c_str());
                         processed.add(path);
                         continue;
@@ -490,15 +469,16 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds
                     claimed = true;
                 }
 
-                const auto policy = sender_.get_policy();
-
-                std::string f = policy.is_encryption_needed() ? path + ".enc" : path;
+                std::string f = do_enc ? path + ".enc" : path;
 
                 try {
                     locked_fd lock(path.c_str(), O_RDONLY);
                     if (!encrypt_to_path_fd(policy, lock.fd, path, f)) {
                         fprintf(stderr, RED "[ERROR] Encryption failed for %s\n" RESET, path.c_str());
-                        if (db_ && claimed) db_->rollback(path);
+                        if (db_ && claimed) { 
+                            db_->rollback(path);
+                            if (do_enc) db_->rollback(f);
+                        }
                         had_error = true;
                         processed.add(path);
                         continue;
@@ -508,7 +488,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds
                     had_error = true;
                     processed.add(f);
 
-                    if (path != f) {
+                    if (do_enc) {
                         if (db_) db_->rollback(path);
                         processed.add(path);
                     }
@@ -517,12 +497,12 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds
                 }
 
                 if (db_) {
-                    db_->try_begin(f);
+                    db_->claim(f);
                     db_->commit(f);
                 }
 
                 processed.add(f);
-                if (path != f) processed.add(path);
+                if (do_enc) processed.add(path);
 
                 qs.push(f);
             }
@@ -540,7 +520,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds
             const fs::path e = entry.path();
             const std::string es = e.string();
 
-            if (is_tmp(es) || processed.contains(es)) continue;
+            if (is_hidden_or_tmp(es) || processed.contains(es)) continue;
 
             if (batch_ && batch_->size > 1) {
                 fprintf(
@@ -584,14 +564,6 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, std::chrono::seconds
 
     if (db_ && !db_->get_path().empty()) {
         const std::string dbp = db_->get_path();
-        // if (!encrypt_to_path(sender_.get_policy(), dbp)) {
-        //     fprintf(
-        //         stderr, 
-        //         RED "[ERROR] DB: Encryption failed for %s\n" RESET, dbp.c_str()
-        //     );
-        //     sender_.send_end();
-        //     return false;
-        // }
         sender_.send_file(dbp);
     }
 

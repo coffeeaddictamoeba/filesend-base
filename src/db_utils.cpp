@@ -138,7 +138,7 @@ bool SentFileDatabase::ensure_up_to_date_(DatabaseEntry& e, uint64_t mtime, uint
     return true;
 }
 
-bool SentFileDatabase::try_begin(const std::string& path) {
+bool SentFileDatabase::claim(const std::string& path) {
     if (path == get_path()) return false;
 
 #ifdef USE_MULTITHREADING

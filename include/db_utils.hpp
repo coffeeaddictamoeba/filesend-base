@@ -31,7 +31,7 @@ public:
 
     bool load();
 
-    bool try_begin(const std::string& path);
+    bool claim(const std::string& path);
     bool commit(const std::string& path);
     void rollback(const std::string& path);
     bool flush();

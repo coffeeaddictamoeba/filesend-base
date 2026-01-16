@@ -49,6 +49,7 @@ private:
     bool connected_{false};
 
     void parse_url();
+    void reset();
     int connect_plain();
     int connect_tls();
     bool is_plain() const { return !use_tls_; }

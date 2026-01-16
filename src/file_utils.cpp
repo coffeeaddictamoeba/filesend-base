@@ -209,15 +209,15 @@ int verify_file_checksum(const char* file_path, const char* sha_received, size_t
     return -1; // checksum mismatch
 }
 
-int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, const char* enc_path, uint32_t flags) {
+int encrypt_file_symmetric(const unsigned char* key, const char* plain_path, const char* enc_path, int enc_all) {
     int fd = open(plain_path, O_RDONLY);
     if (fd < 0) return -1;
-    int rc = encrypt_file_symmetric_fd(key, fd, enc_path, flags);
+    int rc = encrypt_file_symmetric_fd(key, fd, enc_path, enc_all);
     close(fd);
     return rc;
 }
 
-int encrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* enc_path, uint32_t flags) {
+int encrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* enc_path, int enc_all) {
     FILE* fin = fdopen(in_fd, "rb");
     if (!fin) {
         perror(RED "fopen in_fd in file encrypt" RESET);
@@ -268,22 +268,10 @@ int encrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* e
         return -1;
     }
 
-    // Write encryption information to the file header
-    unsigned char flag_bytes[4];
-    u32_to_le(flag_bytes, flags);
-
-    if (fwrite(flag_bytes, 1, sizeof flag_bytes, fout) != sizeof flag_bytes) {
-        fputs(RED "[ERROR] Failed to write enc flags\n" RESET, stderr);
-        fclose(fin);
-        fclose(fout);
-        remove(tmp_enc_path);
-        return -1;
-    }
-
     // Actual encryption
     unsigned long long out_len;
 
-    if ((flags & ENC_FLAG_ALL) && have_md) { // Optionally encrypt metadata as first chunk
+    if (enc_all && have_md) { // Optionally encrypt metadata as first chunk
 
         // Convert to LE for portability
         uint8_t meta_le[FILE_METADATA_SIZE];
@@ -295,7 +283,7 @@ int encrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* e
             &st, 
             meta_ct, &out_len, 
             meta_le, sizeof meta_le, 
-            flag_bytes, sizeof flag_bytes, 
+            NULL, 0, 
             crypto_secretstream_xchacha20poly1305_TAG_MESSAGE) != 0) 
         {
             fprintf(stderr, RED "[ERROR] secretstream_push(meta) failed\n" RESET);
@@ -339,7 +327,7 @@ int encrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* e
             &st, 
             outbuf, &out_len, 
             inbuf, n, 
-            flag_bytes, sizeof flag_bytes, 
+            NULL, 0, 
             tag) != 0) 
         {
             fprintf(stderr, RED "[ERROR] secretstream_push failed\n" RESET);
@@ -368,7 +356,7 @@ int encrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* e
         return -1;
     }
 
-    if ((flags & ENC_FLAG_ALL) && have_md) {
+    if (enc_all && have_md) {
         printf(GREEN "[SUCCESS] File %s and its metadata were successfully encrypted (symmetric)\n" RESET, enc_path);
     } else {
         printf(GREEN "[SUCCESS] File %s was successfully encrypted (symmetric, content only)\n" RESET, enc_path);
@@ -377,15 +365,15 @@ int encrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* e
     return 0;
 }
 
-int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const char* dec_path, uint32_t flags) {
+int decrypt_file_symmetric(const unsigned char* key, const char* enc_path, const char* dec_path, int dec_all) {
     int fd = open(enc_path, O_RDONLY);
     if (fd < 0) return -1;
-    int rc = decrypt_file_symmetric_fd(key, fd, dec_path, flags);
+    int rc = decrypt_file_symmetric_fd(key, fd, dec_path, dec_all);
     close(fd);
     return rc;
 }
 
-int decrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* dec_path, uint32_t flags) {
+int decrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* dec_path, int dec_all) {
     FILE* fin = fdopen(in_fd, "rb");
     if (!fin) {
         perror(RED "fopen of in_fd in decrypt file" RESET);
@@ -426,29 +414,11 @@ int decrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* d
         return -1;
     }
 
-    // Reading encryption flags header
-    unsigned char flag_bytes[4];
-    if (fread(flag_bytes, 1, sizeof flag_bytes, fin) != sizeof flag_bytes) {
-        fputs(RED "[ERROR] Failed to read enc flags\n" RESET, stderr);
-        fclose(fin);
-        fclose(fout);
-        remove(tmp_dec_path);
-        return -1;
-    }
-
-    printf("[DECRYPT] Encryption header bytes: %d\n", u32_from_le(flag_bytes));
-
-    // Do not process plain files
-    if (!(u32_from_le(flag_bytes) & ENC_FLAG_ENABLED)) {
-        printf("[INFO] Decrypt: Skipping plain file\n");
-        return 0;
-    }
-
     // Decryption
     FileMetadata md{};
     int have_md = 0;
 
-    if (flags & ENC_FLAG_ALL) { // Metadata decryption
+    if (dec_all) { // Metadata decryption
         size_t meta_ct_len = FILE_METADATA_SIZE + crypto_secretstream_xchacha20poly1305_ABYTES;
         unsigned char inbuf_meta[FILE_METADATA_SIZE + crypto_secretstream_xchacha20poly1305_ABYTES];
         unsigned char outbuf_meta[FILE_METADATA_SIZE];
@@ -473,7 +443,7 @@ int decrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* d
             outbuf_meta, &out_len, 
             &tag, 
             inbuf_meta, n, 
-            flag_bytes, sizeof flag_bytes) != 0) 
+            NULL, 0) != 0) 
         {
             fputs(RED "[ERROR] secretstream_pull(meta) failed (tampered?)\n" RESET, stderr);
             fclose(fin);
@@ -526,7 +496,7 @@ int decrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* d
             outbuf, &out_len, 
             &tag,
             inbuf, n, 
-            flag_bytes, sizeof flag_bytes) != 0) 
+            NULL, 0) != 0) 
         {
             fputs(RED "[ERROR] secretstream_pull failed (tampered?)\n" RESET, stderr);
             fclose(fin);
@@ -550,7 +520,7 @@ int decrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* d
     fclose(fout);
 
     // Restore metadata if we have it
-    if ((flags & ENC_FLAG_ALL) && have_md) {
+    if (dec_all && have_md) {
         chmod(tmp_dec_path, (mode_t)md.pmode);
         struct utimbuf times;
         times.actime  = (time_t)md.mtime;
@@ -563,7 +533,7 @@ int decrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* d
         return -1;
     }
 
-    if ((flags & ENC_FLAG_ALL) && have_md) {
+    if (dec_all && have_md) {
         printf(GREEN "[SUCCESS] File %s and its metadata were successfully decrypted (symmetric)\n" RESET, dec_path);
     } else {
         printf(GREEN "[SUCCESS] File %s was successfully decrypted (symmetric, content only)\n" RESET, dec_path);
@@ -572,15 +542,15 @@ int decrypt_file_symmetric_fd(const unsigned char* key, int in_fd, const char* d
     return 0;
 }
 
-int encrypt_file_asymmetric(const unsigned char* pub_key, const char* plain_path, const char* enc_path, uint32_t flags) {
+int encrypt_file_asymmetric(const unsigned char* pub_key, const char* plain_path, const char* enc_path, int enc_all) {
     int fd = open(plain_path, O_RDONLY);
     if (fd < 0) return -1;
-    int rc = encrypt_file_asymmetric_fd(pub_key, fd, enc_path, flags);
+    int rc = encrypt_file_asymmetric_fd(pub_key, fd, enc_path, enc_all);
     close(fd);
     return rc;
 }
 
-int encrypt_file_asymmetric_fd(const unsigned char* pub_key, int in_fd, const char* enc_path, uint32_t flags) {
+int encrypt_file_asymmetric_fd(const unsigned char* pub_key, int in_fd, const char* enc_path, int enc_all) {
     FILE* fin = fdopen(in_fd, "rb");
     if (!fin) {
         perror(RED "fopen in_fd in file encrypt" RESET);
@@ -647,22 +617,10 @@ int encrypt_file_asymmetric_fd(const unsigned char* pub_key, int in_fd, const ch
         return -1;
     }
 
-    // Write encryption information to the file header
-    unsigned char flag_bytes[4];
-    u32_to_le(flag_bytes, flags);
-
-    if (fwrite(flag_bytes, 1, sizeof flag_bytes, fout) != sizeof flag_bytes) {
-        fputs(RED "[ERROR] Failed to write enc flags\n" RESET, stderr);
-        fclose(fin);
-        fclose(fout);
-        remove(tmp_enc_path);
-        return -1;
-    }
-
     // Actual file encryption
     unsigned long long out_len;
 
-    if (flags & ENC_FLAG_ALL) { // Optionally encrypt metadata as first chunk
+    if (enc_all) { // Optionally encrypt metadata as first chunk
 
         // Convert to LE for portability
         uint8_t meta_le[FILE_METADATA_SIZE];
@@ -674,7 +632,7 @@ int encrypt_file_asymmetric_fd(const unsigned char* pub_key, int in_fd, const ch
                 &st,
                 meta_ct, &out_len,
                 meta_le, sizeof meta_le,
-                flag_bytes, sizeof flag_bytes,
+                NULL, 0,
                 crypto_secretstream_xchacha20poly1305_TAG_MESSAGE) != 0)
         {
             fprintf(stderr, "secretstream push(meta) failed\n");
@@ -719,7 +677,7 @@ int encrypt_file_asymmetric_fd(const unsigned char* pub_key, int in_fd, const ch
                 &st,
                 outbuf, &out_len,
                 inbuf, n,
-                flag_bytes, sizeof flag_bytes,
+                NULL, 0,
                 tag) != 0)
         {
             fputs(RED "[ERROR] secretstream_push failed\n" RESET, stderr);
@@ -748,7 +706,7 @@ int encrypt_file_asymmetric_fd(const unsigned char* pub_key, int in_fd, const ch
         return -1;
     }
 
-    if (flags & ENC_FLAG_ALL) {
+    if (enc_all) {
         printf(GREEN "[SUCCESS] File %s and its metadata were successfully encrypted (asymmetric)\n" RESET, enc_path);
     } else {
         printf(GREEN "[SUCCESS] File %s was successfully encrypted (content only + assymetric)\n" RESET, enc_path);
@@ -757,15 +715,15 @@ int encrypt_file_asymmetric_fd(const unsigned char* pub_key, int in_fd, const ch
     return 0;
 }
 
-int decrypt_file_asymmetric(const unsigned char* pub_key, const unsigned char* pr_key, const char* enc_path, const char* dec_path, uint32_t flags) {
+int decrypt_file_asymmetric(const unsigned char* pub_key, const unsigned char* pr_key, const char* enc_path, const char* dec_path, int dec_all) {
     int fd = open(enc_path, O_RDONLY);
     if (fd < 0) return -1;
-    int rc = decrypt_file_asymmetric_fd(pub_key, pr_key, fd, dec_path, flags);
+    int rc = decrypt_file_asymmetric_fd(pub_key, pr_key, fd, dec_path, dec_all);
     close(fd);
     return rc;
 }
 
-int decrypt_file_asymmetric_fd(const unsigned char* pub_key, const unsigned char* pr_key, int in_fd, const char* dec_path, uint32_t flags) {
+int decrypt_file_asymmetric_fd(const unsigned char* pub_key, const unsigned char* pr_key, int in_fd, const char* dec_path, int dec_all) {
     FILE *fin = fdopen(in_fd, "rb");
     if (!fin) {
         perror("fopen encrypted input");
@@ -821,29 +779,12 @@ int decrypt_file_asymmetric_fd(const unsigned char* pub_key, const unsigned char
         return -1;
     }
 
-    unsigned char flag_bytes[4];
-    if (fread(flag_bytes, 1, sizeof flag_bytes, fin) != sizeof flag_bytes) {
-        fputs(RED "[ERROR] Failed to read enc flags\n" RESET, stderr);
-        fclose(fin);
-        fclose(fout);
-        remove(tmp_dec_path);
-        return -1;
-    }
-
-    const uint32_t enc_flag = u32_from_le(flag_bytes);
-    if (!(enc_flag & ENC_FLAG_ENABLED)) {
-        printf("[INFO] Decrypt: Skipping plain file (flag: %d)\n", enc_flag);
-        return 0;
-    } else {
-        // disable encryption tag so we don't process it twice later
-    }
-
     // Decryption logic
     FileMetadata md = {};
     int have_md = 0;
 
     // If metadata was encrypted, read/decrypt that first chunk
-    if (flags & ENC_FLAG_ALL) {
+    if (dec_all) {
         size_t meta_ct_len = FILE_METADATA_SIZE + crypto_secretstream_xchacha20poly1305_ABYTES;
         unsigned char inbuf_meta[FILE_METADATA_SIZE + crypto_secretstream_xchacha20poly1305_ABYTES];
         unsigned char outbuf_meta[FILE_METADATA_SIZE];
@@ -864,7 +805,7 @@ int decrypt_file_asymmetric_fd(const unsigned char* pub_key, const unsigned char
                 outbuf_meta, &out_len,
                 &tag,
                 inbuf_meta, n,
-                flag_bytes, sizeof flag_bytes) != 0)
+                NULL, sizeof 0) != 0)
         {
             fprintf(stderr, "secretstream pull(meta) failed (tampered?)\n");
             fclose(fin);
@@ -911,7 +852,7 @@ int decrypt_file_asymmetric_fd(const unsigned char* pub_key, const unsigned char
                 outbuf, &out_len,
                 &tag,
                 inbuf, n,
-                flag_bytes, sizeof flag_bytes) != 0)
+                NULL, 0) != 0)
         {
             fputs(RED "[ERROR] secretstream_pull failed (tampered?)\n" RESET, stderr);
             fclose(fin);
@@ -950,7 +891,7 @@ int decrypt_file_asymmetric_fd(const unsigned char* pub_key, const unsigned char
         return -1;
     }
 
-    if (flags & ENC_FLAG_ALL) {
+    if (dec_all) {
         printf(GREEN "[SUCCESS] File %s and its metadata were successfully decrypted (asymmetric)\n" RESET, dec_path);
     } else {
         printf(GREEN "[SUCCESS] File %s was successfully decrypted (content only + asymmetric)\n" RESET, dec_path);

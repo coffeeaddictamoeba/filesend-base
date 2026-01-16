@@ -28,30 +28,21 @@
 struct locked_fd {
     int fd = -1;
 
-    explicit locked_fd(const char* path, int flag) {
-        fd = open(path, flag);
-
+    explicit locked_fd(const char* path, int flags) {
+        fd = open(path, flags);
         if (fd < 0) {
-            fprintf(
-                stderr, 
-                "[ERROR] open failed on lock for %s\n", path
-            );
+            throw std::runtime_error(std::string("open failed: ") + path);
         }
-
         if (flock(fd, LOCK_EX) != 0) {
-            fprintf(
-                stderr, 
-                "[ERROR] flock failed for %s\n", path
-            );
+            int e = errno;
             close(fd);
             fd = -1;
+            throw std::runtime_error(std::string("flock failed: ") + path + " errno=" + std::to_string(e));
         }
     }
 
-    ~locked_fd() { if (fd >= 0) close(fd); } // close releases flock
-
+    ~locked_fd() { if (fd >= 0) close(fd); }
     locked_fd(const locked_fd&) = delete;
-
     locked_fd& operator=(const locked_fd&) = delete;
 };
 
@@ -91,21 +82,21 @@ int encrypt_file_symmetric(
     const unsigned char* key, 
     const char* plain_path, 
     const char* enc_path,
-    uint32_t flags
+    int enc_all
 );
 
 int decrypt_file_symmetric(
     const unsigned char* key, 
     const char* enc_path, 
     const char* dec_path,
-    uint32_t flags
+    int dec_all
 );
 
 int encrypt_file_asymmetric(
     const unsigned char* pub_key, 
     const char* plain_path, 
     const char* enc_path, 
-    uint32_t flags
+    int enc_all
 );
 
 int decrypt_file_asymmetric(
@@ -113,7 +104,7 @@ int decrypt_file_asymmetric(
     const unsigned char* pr_key, 
     const char* enc_path, 
     const char* dec_path, 
-    uint32_t flags
+    int dec_all
 );
 
 // Encryption/decryption (fd)
@@ -121,21 +112,21 @@ int encrypt_file_symmetric_fd(
     const unsigned char* key,
     int in_fd,
     const char* enc_path,
-    uint32_t flags
+    int enc_all
 );
 
 int decrypt_file_symmetric_fd(
     const unsigned char* key,
     int in_fd,
     const char* dec_path,
-    uint32_t flags
+    int dec_all
 );
 
 int encrypt_file_asymmetric_fd(
     const unsigned char* pub_key,
     int in_fd,
     const char* enc_path,
-    uint32_t flags
+    int enc_all
 );
 
 int decrypt_file_asymmetric_fd(
@@ -143,7 +134,7 @@ int decrypt_file_asymmetric_fd(
     const unsigned char* pr_key,
     int in_fd, 
     const char* dec_path, 
-    uint32_t flags
+    int dec_all
 );
 
 #endif // FILE_UTILS_H
