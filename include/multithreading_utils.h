@@ -1,21 +1,45 @@
 #ifndef MULTITHREADING_H
 #define MULTITHREADING_H
 
+#include <cerrno>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <string_view>
+#include <sys/inotify.h>
+#include <system_error>
+#include <unistd.h>
+#include <fcntl.h>
 #include <condition_variable>
 #include <deque>
 #include <atomic>
 #include <cstddef>
-#include <functional>
-#include <queue>
-#include <string>
 #include <unordered_set>
 #include <utility>
-#include <vector>
 #include <mutex>
 #include <thread>
-#include <limits>
+#include <filesystem>
+
+#include "defaults.h"
 
 #define MAX_WORKERS_MT 4
+
+namespace fs = std::filesystem;
+
+constexpr const char* SPOOL_CLAIMED_DIR = "claimed";
+constexpr const char* SPOOL_WORK_DIR = "work";
+constexpr const char* SPOOL_OUTTMP_DIR = "outtmp";
+constexpr const char* SPOOL_FAILED_DIR = "failed";
+
+constexpr const char* INBOX_SPOOL_DIR = ".filesend_spool";
+constexpr const char* INBOX_OUTBOX_DIR = ".filesend_outbox";
+
+constexpr const char* SPOOL_TEMPDIR_NAMES[] = {
+    SPOOL_CLAIMED_DIR,
+    SPOOL_FAILED_DIR,
+    SPOOL_OUTTMP_DIR,
+    SPOOL_WORK_DIR
+};
 
 class unordered_set_mt {
 public:
@@ -71,6 +95,109 @@ private:
     std::condition_variable cv_;
     std::deque<T> q_;
     bool stop_ = false;
+};
+
+class InotifyWatcher {
+    public:
+        explicit InotifyWatcher(const std::string inbox_dir) : inbox_(std::move(inbox_dir)) {}
+
+        bool start() {
+            ifd_ = ::inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+            if (ifd_ < 0) {
+                fprintf(
+                    stderr, 
+                    "[ERROR] inotify_init1: %s\n", strerror(errno)
+                );
+                return false;
+            }
+
+            uint32_t mask = IN_CREATE | IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_TO;
+            wd_ = ::inotify_add_watch(ifd_, inbox_.c_str(), mask);
+            if (wd_ < 0) {
+                fprintf(
+                    stderr, 
+                    "[ERROR] inotify_add_watch(%s): %s\n", inbox_.c_str(), strerror(errno)
+                );
+                ::close(ifd_);
+                ifd_ = -1;
+                return false;
+            }
+
+            return true;
+        }
+
+        void stop() {
+            if (ifd_ >= 0) {
+                if (wd_ >= 0) ::inotify_rm_watch(ifd_, wd_);
+                ::close(ifd_);
+            }
+            ifd_ = -1;
+            wd_  = -1;
+        }
+
+        template<class ReadyFn>
+        void loop(ReadyFn on_ready, std::atomic<bool>& running, std::atomic<long long>& last_activity_ms) {
+            alignas(inotify_event) char buf[64*1024];
+
+            while (running.load(std::memory_order_relaxed)) {
+                ssize_t n = ::read(ifd_, buf, sizeof(buf));
+                if (n < 0) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        continue;
+                    }
+                    fprintf(stderr, "[ERROR] inotify read: %s\n", strerror(errno));
+                    break;
+                }
+
+                if (n == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    continue;
+                }
+
+                auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+                last_activity_ms.store(now_ms, std::memory_order_relaxed);
+
+                size_t off = 0;
+                while (off < (size_t)n) {
+                    auto* ev = reinterpret_cast<inotify_event*>(buf + off);
+                    off += sizeof(inotify_event) + ev->len;
+
+                    if (ev->len == 0 || is_hidden_or_tmp(ev->name)) continue;
+
+                    std::string name(ev->name);
+
+                    if (ev->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
+                        fs::path f = inbox_ / name;
+                        std::error_code ec;
+                        if (!fs::is_regular_file(f, ec)) continue;
+
+                        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch()).count();
+                        last_activity_ms.store(now_ms, std::memory_order_relaxed);
+
+                        auto print_mask = [](uint32_t m) {
+                    std::string s;
+                    if (m & IN_CREATE) s += " CREATE";
+                    if (m & IN_MODIFY) s += " MODIFY";
+                    if (m & IN_CLOSE_WRITE) s += " CLOSE_WRITE";
+                    if (m & IN_MOVED_TO) s += " MOVED_TO";
+                    return s.empty() ? " (none)" : s;
+                };
+
+                // right after you build `name`:
+                std::fprintf(stdout, "[INOTIFY] name=%s mask=%s\n", name.c_str(), print_mask(ev->mask).c_str());
+
+                        on_ready(f);
+                    }
+                }
+            }
+        }
+
+    private:
+        fs::path inbox_;
+        int ifd_ = -1;
+        int wd_  = -1;
 };
 
 #endif // MULTITHREADING_H

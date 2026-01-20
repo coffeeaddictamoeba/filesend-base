@@ -220,7 +220,7 @@ void ArgParser::handle_send(int argc, char** argv) {
         const char* arg = argv[i];
         if      (strcmp(arg, "--encrypt") == 0)  { handle_send_encrypt(i, argc, argv); } 
         else if (strcmp(arg, "--all") == 0)      { config_.policy.enc_p.flags |= ENC_FLAG_ALL; } 
-        else if (strcmp(arg, "--save-orig") == 0){ config_.policy.enc_p.flags |= ENC_FLAG_SAVE_ORIG; } 
+        else if (strcmp(arg, "--noarchive") == 0){ config_.policy.enc_p.flags |= ENC_FLAG_NOARCHIVE; } 
         else if (strcmp(arg, "--batch") == 0)    { handle_send_batch(i, argc, argv); }
         else if (strcmp(arg, "--timeout") == 0)  { handle_mode_timeout(i, argc, argv); }
         else if (strcmp(arg, "--retry") == 0)    { handle_send_retry(i, argc, argv); }

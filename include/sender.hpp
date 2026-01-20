@@ -47,7 +47,7 @@ struct FilesendPolicy {
     bool is_encryption_needed()     const noexcept { return enc_p.flags & ENC_FLAG_ENABLED; }
     bool is_encryption_symmetric()  const noexcept { return enc_p.flags & ENC_FLAG_SYMMETRIC; }
     bool is_encryption_for_all()    const noexcept { return enc_p.flags & ENC_FLAG_ALL; }
-    bool is_encryption_in_place()   const noexcept { return !(enc_p.flags & ENC_FLAG_SAVE_ORIG); } // if orig file is saved, encryption is not "in-place"
+    bool is_encryption_noarchive()   const noexcept { return enc_p.flags & ENC_FLAG_NOARCHIVE; } // if this flag is set, files are not saved after sending
 };
 
 class Sender {
@@ -103,8 +103,6 @@ static bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const st
 
     if (enc_file_path.empty()) return false;
 
-    const std::string enc_file_path_temp = enc_file_path + ".tmp";
-
     const char* key_path = policy.enc_p.key_path.empty() ? nullptr : policy.enc_p.key_path.c_str();
 
     // SYMMETRIC ENCRYPTION
@@ -117,7 +115,7 @@ static bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const st
             return false;
         }
 
-        if (encrypt_file_symmetric_fd(key, in_fd, enc_file_path_temp.c_str(), policy.is_encryption_for_all()) != 0) {
+        if (encrypt_file_symmetric_fd(key, in_fd, enc_file_path.c_str(), policy.is_encryption_for_all()) != 0) {
             fprintf(stderr, "[ERROR] Failed to encrypt %s (symmetric)\n", file_path.c_str());
             return false;
         }
@@ -133,18 +131,13 @@ static bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const st
             return false;
         }
 
-        if (encrypt_file_asymmetric_fd(pub_key, in_fd, enc_file_path_temp.c_str(), policy.is_encryption_for_all()) != 0) {
+        if (encrypt_file_asymmetric_fd(pub_key, in_fd, enc_file_path.c_str(), policy.is_encryption_for_all()) != 0) {
             fprintf(stderr, "[ERROR] Failed to encrypt %s (asymmetric)\n", file_path.c_str());
             return false;
         }
     }
 
-    if (rename(enc_file_path_temp.c_str(), enc_file_path.c_str()) != 0) {
-        perror("rename in encrypt_to_path_fd");
-        return false;
-    }
-
-    if (policy.is_encryption_in_place()) remove(file_path.c_str()); // leave only encrypted version
+    if (policy.is_encryption_noarchive()) remove(file_path.c_str()); // leave only encrypted version
 
     return true;
 }

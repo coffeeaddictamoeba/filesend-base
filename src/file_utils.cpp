@@ -805,7 +805,7 @@ int decrypt_file_asymmetric_fd(const unsigned char* pub_key, const unsigned char
                 outbuf_meta, &out_len,
                 &tag,
                 inbuf_meta, n,
-                NULL, sizeof 0) != 0)
+                NULL, 0) != 0)
         {
             fprintf(stderr, "secretstream pull(meta) failed (tampered?)\n");
             fclose(fin);

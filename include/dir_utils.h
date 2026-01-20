@@ -25,6 +25,23 @@
 #include "db_utils.hpp"
 #include "sender_https.hpp"
 
+
+#ifdef USE_MULTITHREADING
+#include "../include/multithreading_utils.h"
+
+struct TempDirsConfig {
+    fs::path inbox;
+    const fs::path spool       = inbox / INBOX_SPOOL_DIR;
+    const fs::path claimed_dir = spool / SPOOL_CLAIMED_DIR;
+    const fs::path work_dir    = spool / SPOOL_WORK_DIR;
+    const fs::path outtmp_dir  = spool / SPOOL_OUTTMP_DIR;
+    const fs::path failed_dir  = spool / SPOOL_FAILED_DIR;
+    const fs::path outbox      = inbox / INBOX_OUTBOX_DIR;
+
+    explicit TempDirsConfig(const fs::path inbox_dir) : inbox(std::move(inbox_dir)) {};
+};
+#endif
+
 namespace fs = std::filesystem;
 
 class FileBatch {

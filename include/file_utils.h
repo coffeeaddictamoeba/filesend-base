@@ -22,7 +22,7 @@
 #define ENC_FLAG_ENABLED    (1u << 0)
 #define ENC_FLAG_SYMMETRIC  (1u << 1)
 #define ENC_FLAG_ALL        (1u << 2)
-#define ENC_FLAG_SAVE_ORIG  (1u << 3)
+#define ENC_FLAG_NOARCHIVE  (1u << 3)
 #define ENC_FLAG_RESERVED2  (1u << 4)
 
 struct locked_fd {
