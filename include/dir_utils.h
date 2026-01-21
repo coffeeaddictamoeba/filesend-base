@@ -37,6 +37,7 @@ struct TempDirsConfig {
     const fs::path outtmp_dir  = spool / SPOOL_OUTTMP_DIR;
     const fs::path failed_dir  = spool / SPOOL_FAILED_DIR;
     const fs::path outbox      = inbox / INBOX_OUTBOX_DIR;
+    const fs::path archive     = inbox / INBOX_ARCHIVE_DIR;
 
     explicit TempDirsConfig(const fs::path inbox_dir) : inbox(std::move(inbox_dir)) {};
 };

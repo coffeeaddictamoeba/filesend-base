@@ -414,17 +414,13 @@ static inline int open_dup_readonly(const fs::path& p) {
     return fd2;
 }
 
-bool FileSender::send_files_from_path_mt(const fs::path& p, int nthreads = MAX_WORKERS_MT) {
-    return send_files_from_path_mt(p, sender_.get_policy().timeout, nthreads);
-}
-
 static inline bool rename_successful(const fs::path& a, const fs::path& b) {
     std::error_code ec;
     fs::rename(a, b, ec);
     return !ec;
 }
 
-void init_workdirs(int nthreads, const fs::path& inbox, const TempDirsConfig& dc, std::vector<fs::path>* workdirs) {
+static void init_workdirs(int nthreads, const fs::path& inbox, const TempDirsConfig& dc, std::vector<fs::path>* workdirs) {
     assert(nthreads <= MAX_WORKERS_MT);
 
     fs::create_directories(dc.claimed_dir);
@@ -432,6 +428,7 @@ void init_workdirs(int nthreads, const fs::path& inbox, const TempDirsConfig& dc
     fs::create_directories(dc.outtmp_dir);
     fs::create_directories(dc.failed_dir);
     fs::create_directories(dc.outbox);
+    fs::create_directories(dc.archive);
 
     workdirs->reserve(nthreads);
     for (int i = 0; i < nthreads; ++i) {
@@ -439,6 +436,10 @@ void init_workdirs(int nthreads, const fs::path& inbox, const TempDirsConfig& dc
         fs::create_directories(d);
         workdirs->push_back(d);
     }
+}
+
+bool FileSender::send_files_from_path_mt(const fs::path& p, int nthreads = MAX_WORKERS_MT) {
+    return send_files_from_path_mt(p, sender_.get_policy().timeout, nthreads);
 }
 
 bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::seconds timeout, int nthreads = MAX_WORKERS_MT) {
@@ -495,6 +496,8 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
         workers.emplace_back([&, i]{
             fs::path claimed;
             while (qe.pop(claimed)) {
+
+                printf("[INFO] TID %d: Acquired plainfile: %s\n", i, claimed.c_str());
 
                 // Worker-exclusive claim via rename to its workdir
                 fs::path mine = workdirs[i] / (claimed.filename().string() + ".w." + unique_suffix());
@@ -562,12 +565,9 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                     continue;
                 }
 
-                if (policy.is_encryption_noarchive()) fs::remove(mine);
+                fs::remove(mine);
 
-                if (db_) { // Add to DB
-                    db_->claim(enc_final.string());
-                    db_->commit(enc_final.string());
-                }
+                if (db_) db_->claim(enc_final.string()); // commit occurs after successful sending
 
                 qs.push(enc_final); // sender thread will decrement inflight when it sends
             }
@@ -610,7 +610,9 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
             continue;
         }
 
-        fs::path claimed = dc.claimed_dir / (name + ".c." + unique_suffix());
+        if (policy.is_encryption_archive()) fs::copy_file(e, dc.archive / name);
+
+        const fs::path claimed = dc.claimed_dir / (name + ".c." + unique_suffix());
 
         if (!rename_successful(e, claimed)) {
             if (db_) db_->rollback(e);
@@ -648,7 +650,9 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                 return;
             }
 
-            fs::path claimed = dc.claimed_dir / (name + ".c." + unique_suffix());
+            if (policy.is_encryption_archive()) fs::copy_file(ready_file, dc.archive / name);
+
+            const fs::path claimed = dc.claimed_dir / (name + ".c." + unique_suffix());
             if (!rename_successful(ready_file, claimed)) {
                 if (db_) db_->rollback(name);
                 return;

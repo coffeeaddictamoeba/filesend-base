@@ -33,6 +33,7 @@ constexpr const char* SPOOL_FAILED_DIR = "failed";
 
 constexpr const char* INBOX_SPOOL_DIR = ".filesend_spool";
 constexpr const char* INBOX_OUTBOX_DIR = ".filesend_outbox";
+constexpr const char* INBOX_ARCHIVE_DIR = ".filesend_archive";
 
 constexpr const char* SPOOL_TEMPDIR_NAMES[] = {
     SPOOL_CLAIMED_DIR,
@@ -175,18 +176,6 @@ class InotifyWatcher {
                         auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now().time_since_epoch()).count();
                         last_activity_ms.store(now_ms, std::memory_order_relaxed);
-
-                        auto print_mask = [](uint32_t m) {
-                    std::string s;
-                    if (m & IN_CREATE) s += " CREATE";
-                    if (m & IN_MODIFY) s += " MODIFY";
-                    if (m & IN_CLOSE_WRITE) s += " CLOSE_WRITE";
-                    if (m & IN_MOVED_TO) s += " MOVED_TO";
-                    return s.empty() ? " (none)" : s;
-                };
-
-                // right after you build `name`:
-                std::fprintf(stdout, "[INOTIFY] name=%s mask=%s\n", name.c_str(), print_mask(ev->mask).c_str());
 
                         on_ready(f);
                     }
