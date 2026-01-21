@@ -44,10 +44,10 @@ struct FilesendPolicy {
     RetryPolicy retry_connect;
     std::chrono::seconds timeout;
 
-    bool is_encryption_needed()     const noexcept { return enc_p.flags & ENC_FLAG_ENABLED; }
-    bool is_encryption_symmetric()  const noexcept { return enc_p.flags & ENC_FLAG_SYMMETRIC; }
-    bool is_encryption_for_all()    const noexcept { return enc_p.flags & ENC_FLAG_ALL; }
-    bool is_encryption_archive()    const noexcept { return enc_p.flags & ENC_FLAG_ARCHIVE; }
+    bool is_encryption_needed()       const noexcept { return enc_p.flags & ENC_FLAG_ENABLED; }
+    bool is_encryption_symmetric()    const noexcept { return enc_p.flags & ENC_FLAG_SYMMETRIC; }
+    bool is_encryption_for_all()      const noexcept { return enc_p.flags & ENC_FLAG_ALL; }
+    bool is_encryption_with_archive() const noexcept { return enc_p.flags & ENC_FLAG_ARCHIVE; }
 };
 
 class Sender {
@@ -137,7 +137,7 @@ static bool encrypt_to_path_fd(const FilesendPolicy& policy, int in_fd, const st
         }
     }
 
-    if (!policy.is_encryption_archive()) remove(file_path.c_str()); // leave only encrypted version
+    if (!policy.is_encryption_with_archive()) remove(file_path.c_str()); // leave only encrypted version
 
     return true;
 }

@@ -2,6 +2,7 @@
 #define MULTITHREADING_H
 
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -188,5 +189,23 @@ class InotifyWatcher {
         int ifd_ = -1;
         int wd_  = -1;
 };
+
+static inline std::string tid_unique_suffix(uint32_t tidx) {
+    thread_local uint32_t local_ctr = 0;
+    uint32_t c = ++local_ctr;
+
+    char buf[32];
+    char* p = buf;
+    *p++ = 't';
+
+    auto r1 = std::to_chars(p, buf + sizeof(buf), tidx);
+    p = r1.ptr;
+    *p++ = '_';
+
+    static constexpr char hex[] = "0123456789abcdef";
+    for (int k = 7; k >= 0; --k) *p++ = hex[(c >> (k*4)) & 0xF];
+
+    return std::string(buf, p);
+}
 
 #endif // MULTITHREADING_H

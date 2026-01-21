@@ -399,13 +399,6 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
 }
 
 #ifdef USE_MULTITHREADING
-static inline std::string unique_suffix() {
-    static std::atomic<uint64_t> ctr{0};
-    uint64_t c = ctr.fetch_add(1, std::memory_order_relaxed);
-    auto tid = std::hash<std::thread::id>{}(std::this_thread::get_id());
-    return std::to_string(::getpid()) + "_" + std::to_string((uint64_t)tid) + "_" + std::to_string(c);
-}
-
 static inline int open_dup_readonly(const fs::path& p) {
     int fd = ::open(p.c_str(), O_RDONLY);
     if (fd < 0) return -1;
@@ -420,7 +413,7 @@ static inline bool rename_successful(const fs::path& a, const fs::path& b) {
     return !ec;
 }
 
-static void init_workdirs(int nthreads, const fs::path& inbox, const TempDirsConfig& dc, std::vector<fs::path>* workdirs) {
+static void init_workdirs(int nthreads, const TempDirsConfig& dc, std::vector<fs::path>* workdirs) {
     assert(nthreads <= MAX_WORKERS_MT);
 
     fs::create_directories(dc.claimed_dir);
@@ -461,7 +454,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
     printf("[INFO] Running with multithreading available. Current threads number: %d\n", nthreads);
 
     TempDirsConfig dc(inbox); std::vector<fs::path> workdirs;
-    init_workdirs(nthreads, inbox, dc, &workdirs);
+    init_workdirs(nthreads, dc, &workdirs);
 
     const auto policy = sender_.get_policy();
     bool do_enc = policy.is_encryption_needed();
@@ -470,7 +463,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
     TaskQueue<fs::path> qs; // to send
 
     std::atomic<bool> had_error{false};
-    std::atomic<int> inflight{0};        // work items currently being processed
+    std::atomic<int>  inflight{0};        // work items currently being processed
 
     // ---------- sender thread ----------
     std::thread sender_thr([&]{
@@ -483,6 +476,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                 had_error = true;
             } else {
                 if (db_) db_->commit(key);
+                if (policy.is_encryption_with_archive()) rename_successful(enc, dc.archive / enc.filename());
             }
             inflight.fetch_sub(1, std::memory_order_relaxed);
         }
@@ -499,8 +493,10 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
 
                 printf("[INFO] TID %d: Acquired plainfile: %s\n", i, claimed.c_str());
 
+                const std::string suffix = tid_unique_suffix(i);
+
                 // Worker-exclusive claim via rename to its workdir
-                fs::path mine = workdirs[i] / (claimed.filename().string() + ".w." + unique_suffix());
+                fs::path mine = workdirs[i] / (claimed.filename().string() + ".w." + suffix);
                 if (!rename_successful(claimed, mine)) {
                     inflight.fetch_sub(1, std::memory_order_relaxed);
                     continue;
@@ -516,7 +512,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                 }
 
                 fs::path enc_final = do_enc ? (dc.outbox / (base + ".enc")) : (dc.outbox / base);
-                fs::path enc_tmp   = dc.outtmp_dir / (base + ".enc.tmp." + unique_suffix());
+                fs::path enc_tmp   = dc.outtmp_dir / (base + ".enc.tmp." + suffix);
 
                 bool ok = true;
 
@@ -557,7 +553,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
 
                 // Publish to outbox
                 if (fs::exists(enc_final)) {
-                    enc_final = dc.outbox / (base + ".dup_" + unique_suffix() + ".enc");
+                    enc_final = dc.outbox / (base + ".dup_" + suffix + ".enc");
                 }
 
                 if (!rename_successful(enc_tmp, enc_final)) {
@@ -567,14 +563,12 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
 
                 fs::remove(mine);
 
-                if (db_) db_->claim(enc_final.string()); // commit occurs after successful sending
+                if (db_ && !db_->claim(enc_final.string())) continue; // commit occurs after successful sending
 
                 qs.push(enc_final); // sender thread will decrement inflight when it sends
             }
         });
     }
-
-    // ---------- Recovery ----------
 
     // 1. Already claimed plaintext
     for (auto& entry : fs::directory_iterator(dc.claimed_dir)) {
@@ -586,7 +580,6 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
     // 2. Outbox not sent yet -> enqueue
     for (auto& entry : fs::directory_iterator(dc.outbox)) {
         if (!entry.is_regular_file()) continue;
-        inflight.fetch_add(1, std::memory_order_relaxed);
 
         const fs::path p = entry.path();
         if (!db_->claim(p)) {
@@ -594,6 +587,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
             continue;
         }
 
+        inflight.fetch_add(1, std::memory_order_relaxed);
         qs.push(p);
     }
 
@@ -610,9 +604,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
             continue;
         }
 
-        if (policy.is_encryption_archive()) fs::copy_file(e, dc.archive / name);
-
-        const fs::path claimed = dc.claimed_dir / (name + ".c." + unique_suffix());
+        const fs::path claimed = dc.claimed_dir / (name + ".c." + tid_unique_suffix(::getpid()));
 
         if (!rename_successful(e, claimed)) {
             if (db_) db_->rollback(e);
@@ -650,9 +642,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                 return;
             }
 
-            if (policy.is_encryption_archive()) fs::copy_file(ready_file, dc.archive / name);
-
-            const fs::path claimed = dc.claimed_dir / (name + ".c." + unique_suffix());
+            const fs::path claimed = dc.claimed_dir / (name + ".c." + tid_unique_suffix(::getpid()));
             if (!rename_successful(ready_file, claimed)) {
                 if (db_) db_->rollback(name);
                 return;
@@ -669,7 +659,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
             auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
             auto last_ms = last_ready_ms.load(std::memory_order_relaxed);
 
-            if ((now_ms - last_ms) >= (timeout.count() * 1000LL) && qe.size() <= 0) {
+            if ((now_ms - last_ms) >= (timeout.count() * 1000LL) && qe.size() <= 0 && qs.size() <= 0) {
                 if (inflight.load(std::memory_order_relaxed) == 0) {
                     printf("[INFO] No new events for %lld seconds and queues drained, stopping.\n", (long long)timeout.count());
                     break;
