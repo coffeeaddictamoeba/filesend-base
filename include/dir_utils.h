@@ -25,25 +25,26 @@
 #include "db_utils.hpp"
 #include "sender_https.hpp"
 
-
 #ifdef USE_MULTITHREADING
 #include "../include/multithreading_utils.h"
+#endif
+
+namespace fs = std::filesystem;
 
 struct TempDirsConfig {
     fs::path inbox;
+#ifdef USE_MULTITHREADING
     const fs::path spool       = inbox / INBOX_SPOOL_DIR;
     const fs::path claimed_dir = spool / SPOOL_CLAIMED_DIR;
     const fs::path work_dir    = spool / SPOOL_WORK_DIR;
     const fs::path outtmp_dir  = spool / SPOOL_OUTTMP_DIR;
     const fs::path failed_dir  = spool / SPOOL_FAILED_DIR;
+#endif
     const fs::path outbox      = inbox / INBOX_OUTBOX_DIR;
     const fs::path archive     = inbox / INBOX_ARCHIVE_DIR;
 
     explicit TempDirsConfig(const fs::path inbox_dir) : inbox(std::move(inbox_dir)) {};
 };
-#endif
-
-namespace fs = std::filesystem;
 
 class FileBatch {
 public:
@@ -123,14 +124,27 @@ private:
     FileBatch* batch_;
 
     bool process_one_file(
-        const fs::path& p,
+        const fs::path& in,  
+        const FilesendPolicy& policy,
+        const TempDirsConfig& dc, 
         std::unordered_set<std::string>* processed
     );
 
     bool process_one_batch(
         const fs::path& p, 
+        const FilesendPolicy& policy, 
+        const TempDirsConfig& dc, 
         std::unordered_set<std::string>* processed
     );
+
+#ifdef USE_MULTITHREADING
+    void process_one_batch_mt(
+        const fs::path& p, 
+        int nthreads
+        /* more args */
+    );
+#endif
+
 };
 
 int process_path(

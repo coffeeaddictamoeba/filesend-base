@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <dirent.h>
@@ -149,6 +150,45 @@ int process_path(const std::string& init, std::string& dest, const std::function
     return process_dir(init, dest, pattern, fn);
 }
 
+// Sending helpers
+static inline int open_dup_readonly(const fs::path& p) {
+    int fd = ::open(p.c_str(), O_RDONLY);
+    if (fd < 0) return -1;
+    int fd2 = ::dup(fd);
+    ::close(fd);
+    return fd2;
+}
+
+static inline bool rename_successful(const fs::path& a, const fs::path& b) {
+    std::error_code ec;
+    fs::rename(a, b, ec);
+    return !ec;
+}
+
+static void init_workdirs(int nthreads, const TempDirsConfig& dc, std::vector<fs::path>* workdirs) {
+#ifdef USE_MULTITHREADING
+    if (nthreads > 0) {
+        assert(nthreads <= MAX_WORKERS_MT);
+
+        fs::create_directories(dc.claimed_dir);
+        fs::create_directories(dc.work_dir);
+        fs::create_directories(dc.outtmp_dir);
+        fs::create_directories(dc.failed_dir);
+
+        workdirs->reserve(nthreads);
+        for (int i = 0; i < nthreads; ++i) {
+            fs::path d = dc.work_dir / ("tid" + std::to_string(i));
+            fs::create_directories(d);
+            workdirs->push_back(d);
+        }
+    }
+#endif
+
+    // Essentials (both st and mt)
+    fs::create_directories(dc.outbox);
+    fs::create_directories(dc.archive);
+}
+
 bool FileSender::send_one_file(const fs::path& p) {
     if (!fs::exists(p) || !fs::is_regular_file(p)) {
         fprintf(
@@ -158,119 +198,117 @@ bool FileSender::send_one_file(const fs::path& p) {
         return false;
     }
 
-    bool ok = process_one_file(p, nullptr);
+    const TempDirsConfig dc(p.parent_path());
+
+    bool ok = process_one_file(p, sender_.get_policy(), dc, nullptr);
     if (ok) sender_.send_end();
 
     return ok;
 }
 
-bool FileSender::process_one_file(const fs::path& p, std::unordered_set<std::string>* processed) {
-    const std::string ps = p.string();
-
+bool FileSender::process_one_file(const fs::path& p, const FilesendPolicy& policy, const TempDirsConfig& dc, std::unordered_set<std::string>* processed) {
     if (processed) {
-        if (processed->count(ps)) return true;
-        processed->insert(ps);
+        if (processed->count(p)) return true;
+        processed->insert(p);
     }
 
     bool claimed = false;
     if (db_) {
-        if (!db_->claim(ps)) {
+        if (!db_->claim(p)) {
             fprintf(stdout, "[INFO] DB: Skipping already sent: %s\n", p.c_str());
             return true;
         }
         claimed = true;
     }
 
-    const auto policy = sender_.get_policy();
-
     fprintf(
         stdout,
-        "[INFO] Processing file: %s (encryption policy: %d)\n",
-        p.c_str(), policy.enc_p.flags
+        "[INFO] Processing file: %s (encryption policy: %d)\n", p.c_str(), policy.enc_p.flags
     );
 
-    std::string f = policy.is_encryption_needed() ? ps + ".enc" : ps;
+    const fs::path name = p.filename();
+    const fs::path enc  = dc.outbox / (policy.is_encryption_needed() ? fs::path(name.string() + ".enc") : name);
 
-    if (!encrypt_to_path(policy, ps, f)) {
-        fprintf(stderr, RED "[ERROR] Encryption failed for %s\n" RESET, p.c_str());
-        if (db_ && claimed) db_->rollback(ps);
+    if (!encrypt_to_path(policy, p, enc)) {
+        fprintf(stderr, RED "[ERROR] Encryption failed for %s\n" RESET, enc.c_str());
+        if (db_ && claimed) db_->rollback(p);
+        return false;
+    } else {
+        fs::remove(p); // remove initial file
+    }
+
+    if (!db_->claim(enc)) return false;
+
+    if (!sender_.send_file(enc)) {
+        fprintf(stderr, RED "[ERROR] Failed to send %s\n" RESET, enc.c_str());
+        if (db_ && claimed) db_->rollback(enc);
         return false;
     }
 
-    if (!sender_.send_file(f)) {
-        fprintf(stderr, RED "[ERROR] Failed to send %s\n" RESET, f.c_str());
-        if (db_ && claimed) db_->rollback(f);
-        return false;
-    }
-
-    if (db_ && claimed) { // we can store only one file as they are the same
-        if (f == ps) {
-            db_->claim(f);
-            db_->commit(f);
-        } else { // we need to store both filenames
-            db_->claim(f);
-            db_->commit(f);
-            db_->commit(ps);
-        }
+    if (db_ && claimed) {
+        db_->commit(p);
+        db_->commit(enc);
+        if (policy.is_encryption_with_archive()) rename_successful(enc, dc.archive / enc.filename());
     }
 
     return true;
 }
 
-bool FileSender::process_one_batch(const fs::path& p, std::unordered_set<std::string>* processed) {
+bool FileSender::process_one_batch(const fs::path& p, const FilesendPolicy& policy, const TempDirsConfig& dc, std::unordered_set<std::string>* processed) {
     if (!batch_->ready) {
-        const std::string ps = p.string();
-
         if (processed) {
-            if (processed->count(ps)) return true;
-            processed->insert(ps);
+            if (processed->count(p)) return true;
+            processed->insert(p);
         }
 
-        if (db_ && !db_->claim(ps)) {
-            fprintf(
-                stdout, 
-                "[INFO] DB: Skipping already sent file in batch: %s\n", ps.c_str()
-            );
+        if (db_ && !db_->claim(p)) {
+            fprintf(stdout, "[INFO] DB: Skipping already sent file in batch: %s\n", p.c_str());
             return true;
         }
 
-        batch_->add(ps);
+        batch_->add(p.string());
     }
 
     if (!batch_->ready) return true;
 
-    const std::string archive = batch_->get_name_timestamped();
-    const auto pending = batch_->get_pending_filenames();
+    const fs::path archive = dc.outbox / batch_->get_name_timestamped();
 
     if (!batch_->compress(archive, batch_->format)) {
-        fprintf(stderr, "[ERROR] Batch compress failed\n");
+        fprintf(stderr, "[ERROR] Batch compress failed: %s\n", archive.c_str());
 
-        if (db_) for (const auto& f : pending) db_->rollback(f);
+        if (db_) {
+            for (const auto& f : batch_->get_pending_filenames()) {
+                db_->rollback(f);
+            }
+        }
 
         batch_->clear();
         return false;
     }
 
-    if (!process_one_file(fs::path(archive), nullptr)) {
-        fprintf(stderr, "[ERROR] Batch send failed\n");
+    if (!process_one_file(archive, policy, dc, nullptr)) {
+        fprintf(stderr, "[ERROR] Batch send failed: %s\n", archive.c_str());
 
-        if (db_) for (const auto& f : pending) db_->rollback(f);
+        if (db_) {
+            for (const auto& f : batch_->get_pending_filenames()) {
+                db_->rollback(f);
+            }
+        }
 
         batch_->clear();
         return false;
     }
 
     if (db_) {
-        for (const auto& f : pending) {
+        for (const auto& f : batch_->get_pending_filenames()) {
             if (!db_->commit(f)) {
-                fprintf(
-                    stderr, 
-                    "[WARN] DB commit false for %s\n", f.c_str()
-                );
+                fprintf(stderr, "[WARN] DB commit false for %s\n", f.c_str());
             }
         }
         db_->flush();
     }
+
+    if (policy.is_encryption_with_archive()) rename_successful(archive, dc.archive / archive.filename());
 
     batch_->increment_id();
     batch_->clear();
@@ -282,32 +320,33 @@ bool FileSender::send_files_from_path(const fs::path& p) {
     return send_files_from_path(p, sender_.get_policy().timeout);
 }
 
-bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds timeout) {
+bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::seconds timeout) {
     DbFlushGuard guard(db_);
 
-    if (!fs::exists(p)) {
-        fprintf(
-            stderr,
-            RED "[ERROR] Path %s does not exist\n" RESET, p.c_str()
-        );
+    if (!fs::exists(inbox)) {
+        fprintf(stderr, RED "[ERROR] Path %s does not exist\n" RESET, inbox.c_str());
         return false;
     }
 
     // Single file mode
-    if (fs::is_regular_file(p)) {
-        bool ok = process_one_file(p, nullptr);
+    if (fs::is_regular_file(inbox)) {
+        const TempDirsConfig dc(inbox.parent_path());
+        bool ok = process_one_file(inbox, sender_.get_policy(), dc, nullptr);
         if (ok) sender_.send_end();
         return ok;
     }
 
     // Directory mode
-    if (!fs::is_directory(p)) {
-        fprintf(
-            stderr,
-            RED "[ERROR] %s is neither file nor directory\n" RESET, p.c_str()
-        );
+    if (!fs::is_directory(inbox)) {
+        fprintf(stderr, RED "[ERROR] %s is neither file nor directory\n" RESET, inbox.c_str());
         return false;
     }
+
+    const TempDirsConfig dc(inbox);
+    init_workdirs(0, dc, nullptr); // init only essential dirs
+
+    const auto policy = sender_.get_policy();
+    bool do_enc = policy.is_encryption_needed();
 
     std::unordered_set<std::string> processed;
 
@@ -317,7 +356,7 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
     while (true) {
         bool new_in_this_round = false;
 
-        for (auto& entry : fs::directory_iterator(p)) {
+        for (auto& entry : fs::directory_iterator(inbox)) {
             if (!entry.is_regular_file()) continue;
 
             const fs::path e = entry.path();
@@ -325,7 +364,7 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
             if (processed.count(e)) continue;
 
             if (batch_ && batch_->size > 1) {
-                if (!process_one_batch(e, &processed)) {
+                if (!process_one_batch(e, policy, dc, &processed)) {
                     fprintf(
                         stderr,
                         RED "[ERROR] Warning: failed to process batch %d\n" RESET, batch_->get_id()
@@ -333,7 +372,7 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
                     continue;
                 }
             } else {
-                if (!process_one_file(e,  &processed)) {
+                if (!process_one_file(e, policy, dc, &processed)) {
                     fprintf(
                         stderr,
                         RED "[ERROR] Warning: failed to process %s\n" RESET, e.c_str()
@@ -355,34 +394,30 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
         if (!new_in_this_round) {
             auto now = std::chrono::steady_clock::now();
             if (now - last_new >= timeout) {
-                fprintf(
-                    stdout,
-                    YELLOW "[INFO] No new files for %lld seconds, stopping.\n" RESET, (long long)timeout.count()
-                );
 
                 if (batch_ && batch_->qsize() > 0) {
                     
                     printf(
-                        "[INFO] Timeout reached, sending last batch: %d (queue size: %zu/%zu).\n", 
-                        batch_->get_id(), batch_->qsize(), batch_->size
+                        "[INFO] Timeout reached (%lld seconds), sending last batch: %d (queue size: %zu/%zu).\n", 
+                        (long long)timeout.count(), batch_->get_id(), batch_->qsize(), batch_->size
                     );
 
                     batch_->ready = true;
 
                     fs::path dummy;
-                    if (!process_one_batch(dummy, &processed)) {
+                    if (!process_one_batch(dummy, policy, dc,&processed)) {
                         fprintf(
                             stderr,
                             RED "[ERROR] Warning: failed to process last batch %d (queue size: %zu/%zu)\n" RESET, 
                             batch_->get_id(), batch_->qsize(), batch_->size
                         );
                     }
+                } else {
+                    printf(YELLOW "[INFO] Timeout reached: No new events for %lld seconds, stopping.\n" RESET, (long long)timeout.count());
                 }
 
-                if (db_) db_->flush(); // save all 
-
-                // If DB is NOT needed on server, comment
-                if (db_ && !db_->get_path().empty()) {
+                if (db_) {
+                    db_->flush(); // save all 
                     sender_.send_file(db_->get_path());
                 }
 
@@ -399,36 +434,8 @@ bool FileSender::send_files_from_path(const fs::path& p, std::chrono::seconds ti
 }
 
 #ifdef USE_MULTITHREADING
-static inline int open_dup_readonly(const fs::path& p) {
-    int fd = ::open(p.c_str(), O_RDONLY);
-    if (fd < 0) return -1;
-    int fd2 = ::dup(fd);
-    ::close(fd);
-    return fd2;
-}
-
-static inline bool rename_successful(const fs::path& a, const fs::path& b) {
-    std::error_code ec;
-    fs::rename(a, b, ec);
-    return !ec;
-}
-
-static void init_workdirs(int nthreads, const TempDirsConfig& dc, std::vector<fs::path>* workdirs) {
-    assert(nthreads <= MAX_WORKERS_MT);
-
-    fs::create_directories(dc.claimed_dir);
-    fs::create_directories(dc.work_dir);
-    fs::create_directories(dc.outtmp_dir);
-    fs::create_directories(dc.failed_dir);
-    fs::create_directories(dc.outbox);
-    fs::create_directories(dc.archive);
-
-    workdirs->reserve(nthreads);
-    for (int i = 0; i < nthreads; ++i) {
-        fs::path d = dc.work_dir / ("tid" + std::to_string(i));
-        fs::create_directories(d);
-        workdirs->push_back(d);
-    }
+void FileSender::process_one_batch_mt(const fs::path& p, int nthreads) {
+    // will be implemented later
 }
 
 bool FileSender::send_files_from_path_mt(const fs::path& p, int nthreads = MAX_WORKERS_MT) {
@@ -439,7 +446,8 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
     DbFlushGuard guard(db_);
 
     if (fs::is_regular_file(inbox)) {
-        bool ok = process_one_file(inbox, nullptr);
+        const TempDirsConfig dc(inbox.parent_path());
+        bool ok = process_one_file(inbox, sender_.get_policy(), dc, nullptr);
         if (ok) sender_.send_end();
         return ok;
     }
@@ -452,6 +460,8 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
     nthreads = nthreads ? std::min(nthreads, MAX_WORKERS_MT) : MAX_WORKERS_MT;
     
     printf("[INFO] Running with multithreading available. Current threads number: %d\n", nthreads);
+
+    if (nthreads == 1) return send_files_from_path(inbox); // support single-threaded mode inside multithreaded
 
     TempDirsConfig dc(inbox); std::vector<fs::path> workdirs;
     init_workdirs(nthreads, dc, &workdirs);
@@ -644,7 +654,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
 
             const fs::path claimed = dc.claimed_dir / (name + ".c." + tid_unique_suffix(::getpid()));
             if (!rename_successful(ready_file, claimed)) {
-                if (db_) db_->rollback(name);
+                if (db_) db_->rollback(f);
                 return;
             }
 
@@ -653,7 +663,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
         }, running, last_ready_ms);
     });
 
-    // Stop if timeout > 0 AND there were no new ready events for timeout AND inflight == 0
+    // Stop condition
     if (timeout.count() > 0) {
         while (true) {
             auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -661,7 +671,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
 
             if ((now_ms - last_ms) >= (timeout.count() * 1000LL) && qe.size() <= 0 && qs.size() <= 0) {
                 if (inflight.load(std::memory_order_relaxed) == 0) {
-                    printf("[INFO] No new events for %lld seconds and queues drained, stopping.\n", (long long)timeout.count());
+                    printf("[INFO] Timeout reached: No new events for %lld seconds, stopping.\n", (long long)timeout.count());
                     break;
                 }
             }
@@ -671,7 +681,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
         for (;;) std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
-    // ---------- shutdown ----------
+    // Shutdown
     running = false;
     watcher.stop();
     inotify_thr.join();
@@ -681,9 +691,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
 
     if (db_) {
         db_->flush();
-        if (!db_->get_path().empty()) {
-            sender_.send_file(db_->get_path());
-        }
+        sender_.send_file(db_->get_path());
     }
 
     sender_.send_end();

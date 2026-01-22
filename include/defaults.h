@@ -48,6 +48,10 @@ constexpr const char* COMPRESSION_FORMATS_AVAILABLE[] = {
     "tar.gz"
 };
 
+// Additional directory names specification can be found in "multithreading_utils.h"
+constexpr const char* INBOX_OUTBOX_DIR  = ".filesend_outbox";
+constexpr const char* INBOX_ARCHIVE_DIR = ".filesend_archive";
+
 inline bool is_hidden_or_tmp(const std::string& name) {
     if (name.empty() || name[0] == '.') return true;
 

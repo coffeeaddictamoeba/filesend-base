@@ -33,8 +33,6 @@ constexpr const char* SPOOL_OUTTMP_DIR = "outtmp";
 constexpr const char* SPOOL_FAILED_DIR = "failed";
 
 constexpr const char* INBOX_SPOOL_DIR = ".filesend_spool";
-constexpr const char* INBOX_OUTBOX_DIR = ".filesend_outbox";
-constexpr const char* INBOX_ARCHIVE_DIR = ".filesend_archive";
 
 constexpr const char* SPOOL_TEMPDIR_NAMES[] = {
     SPOOL_CLAIMED_DIR,

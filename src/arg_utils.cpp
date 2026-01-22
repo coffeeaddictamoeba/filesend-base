@@ -12,10 +12,10 @@ ArgParser::ArgParser() {
         {"--help", [this](int argc, char** argv) { (void)argc, usage(argv[0]); }},
 
         // Modes
-        {"send", [this](int argc, char** argv) { handle_send(argc, argv); }},
+        {"send",    [this](int argc, char** argv) { handle_send(argc, argv); }},
         {"encrypt", [this](int argc, char** argv) { handle_security_settings(argc, argv); }},
         {"decrypt", [this](int argc, char** argv) { handle_security_settings(argc, argv); }},
-        {"verify", [this](int argc, char** argv) { handle_verify(argc, argv); }},
+        {"verify",  [this](int argc, char** argv) { handle_verify(argc, argv); }},
     };
 }
 
@@ -26,10 +26,10 @@ void ArgParser::usage(const char* prog) const {
         "  %s send  [--https|--ws]  <path> <url> "
         "[--encrypt symmetric|asymmetric] [--all] "
         "[--timeout <n>] [--retry <n>] [--no-retry] "
-        "[--batch <n> <format>] [--save-orig] [--nthreads <n>]\n" 
+        "[--batch <n> <format>] [--archive] [--nthreads <n>]\n" 
 
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>] [--save-orig]\n"
+        "[--dest <file>] [--timeout <n>]\n"
 
         "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
         "[--dest <file>] [--timeout <n>]\n"
@@ -234,6 +234,10 @@ void ArgParser::handle_send(int argc, char** argv) {
             return;
         }
     }
+
+#ifdef USE_MULTITHREADING
+    if (config_.nthreads > 1 || config_.nthreads <= 0) config_.batch_size = 1; // safety measure for now, will be fixed later
+#endif
 }
 
 void ArgParser::handle_key_mode(const char* flag, const char* mode) {
