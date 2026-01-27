@@ -37,10 +37,10 @@ struct TempDirsConfig {
     const fs::path spool       = inbox / INBOX_SPOOL_DIR;
     const fs::path claimed_dir = spool / SPOOL_CLAIMED_DIR;
     const fs::path work_dir    = spool / SPOOL_WORK_DIR;
-    const fs::path outtmp_dir  = spool / SPOOL_OUTTMP_DIR;
     const fs::path failed_dir  = spool / SPOOL_FAILED_DIR;
 #endif
     const fs::path outbox      = inbox / INBOX_OUTBOX_DIR;
+    const fs::path outtmp_dir  = inbox / INBOX_OUTTMP_DIR;
     const fs::path archive     = inbox / INBOX_ARCHIVE_DIR;
 
     explicit TempDirsConfig(const fs::path inbox_dir) : inbox(std::move(inbox_dir)) {};
@@ -59,6 +59,14 @@ public:
         std::size_t batch_size, 
         std::string& batch_format
     );
+
+    void operator=(const FileBatch& batch) {
+        this->size    = batch.size;
+        this->format  = batch.format;
+        this->pending = batch.pending;
+        this->id      = batch.id;
+        this->ready   = batch.ready;
+    }
 
     void add(std::string_view file_path);
     void remove(std::string_view file_path);
@@ -124,27 +132,36 @@ private:
     FileBatch* batch_;
 
     bool process_one_file(
-        const fs::path& in,  
-        const FilesendPolicy& policy,
-        const TempDirsConfig& dc, 
-        std::unordered_set<std::string>* processed
-    );
-
-    bool process_one_batch(
-        const fs::path& p, 
+        const fs::path& in, 
+        fs::path& out, 
         const FilesendPolicy& policy, 
         const TempDirsConfig& dc, 
         std::unordered_set<std::string>* processed
     );
 
-#ifdef USE_MULTITHREADING
-    void process_one_batch_mt(
-        const fs::path& p, 
-        int nthreads
-        /* more args */
+    bool process_and_send_one_file(
+        const fs::path& in, 
+        const FilesendPolicy& policy, 
+        const TempDirsConfig& dc, 
+        std::unordered_set<std::string>* processed
     );
-#endif
 
+    bool process_one_batch(
+        FileBatch& b,
+        const fs::path& in, 
+        fs::path& archive, 
+        const FilesendPolicy& policy, 
+        const TempDirsConfig& dc, 
+        std::unordered_set<std::string>* processed
+    );
+
+    bool process_and_send_one_batch(
+        FileBatch& b,
+        const fs::path& in, 
+        const FilesendPolicy& policy, 
+        const TempDirsConfig& dc, 
+        std::unordered_set<std::string>* processed
+    );
 };
 
 int process_path(

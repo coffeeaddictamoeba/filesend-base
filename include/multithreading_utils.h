@@ -29,7 +29,6 @@ namespace fs = std::filesystem;
 
 constexpr const char* SPOOL_CLAIMED_DIR = "claimed";
 constexpr const char* SPOOL_WORK_DIR = "work";
-constexpr const char* SPOOL_OUTTMP_DIR = "outtmp";
 constexpr const char* SPOOL_FAILED_DIR = "failed";
 
 constexpr const char* INBOX_SPOOL_DIR = ".filesend_spool";
@@ -37,7 +36,6 @@ constexpr const char* INBOX_SPOOL_DIR = ".filesend_spool";
 constexpr const char* SPOOL_TEMPDIR_NAMES[] = {
     SPOOL_CLAIMED_DIR,
     SPOOL_FAILED_DIR,
-    SPOOL_OUTTMP_DIR,
     SPOOL_WORK_DIR
 };
 

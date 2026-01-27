@@ -235,9 +235,9 @@ void ArgParser::handle_send(int argc, char** argv) {
         }
     }
 
-#ifdef USE_MULTITHREADING
-    if (config_.nthreads > 1 || config_.nthreads <= 0) config_.batch_size = 1; // safety measure for now, will be fixed later
-#endif
+// #ifdef USE_MULTITHREADING
+//     if (config_.nthreads > 1 || config_.nthreads <= 0) config_.batch_size = 1; // safety measure for now, will be fixed later
+// #endif
 }
 
 void ArgParser::handle_key_mode(const char* flag, const char* mode) {
