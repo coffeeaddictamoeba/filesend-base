@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <cstdio>
 
 #include "../include/dir_utils.h"
@@ -56,6 +57,29 @@ std::string FileBatch::get_name_timestamped() const {
         out, 
         sizeof(out), 
         "batch_%03d_%s.%s", id, ts, format.c_str()
+    );
+
+    return std::string(out);
+}
+
+std::string FileBatch::get_name_timestamped(uint32_t tag) const {
+    std::time_t t = std::time(nullptr);
+    std::tm tm{};
+
+#if defined(__unix__) || defined(__APPLE__)
+    localtime_r(&t, &tm);
+#else
+    tm = *std::localtime(&t);
+#endif
+        
+    char ts[64];
+    if (std::strftime(ts, sizeof(ts), DEFAULT_DATE_FORMAT, &tm) == 0) return "";
+
+    char out[256];
+    snprintf(
+        out, 
+        sizeof(out), 
+        "batch_%03d_%s_%03d.%s", id, ts, tag, format.c_str()
     );
 
     return std::string(out);

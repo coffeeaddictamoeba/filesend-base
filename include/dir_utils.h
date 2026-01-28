@@ -77,6 +77,7 @@ public:
     int increment_id() { return ++id; }
 
     std::string get_name_timestamped() const;
+    std::string get_name_timestamped(uint32_t tag) const;
 
     std::vector<std::string> get_pending_filenames() const { return pending; }
 
@@ -152,7 +153,8 @@ private:
         fs::path& archive, 
         const FilesendPolicy& policy, 
         const TempDirsConfig& dc, 
-        std::unordered_set<std::string>* processed
+        std::unordered_set<std::string>* processed,
+        uint32_t tag
     );
 
     bool process_and_send_one_batch(
