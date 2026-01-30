@@ -16,10 +16,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <zip.h>
-#include <archive.h>
-#include <archive_entry.h>
-
 #include "defaults.h"
 #include "sender.hpp"
 #include "db_utils.hpp"
@@ -165,10 +161,3 @@ private:
         std::unordered_set<std::string>* processed
     );
 };
-
-int process_path(
-    const std::string& init, 
-    std::string& dest, 
-    const std::function<int(const std::string& src, const std::string& dest)>& fn
-);
-

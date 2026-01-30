@@ -4,11 +4,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
-#include <exception>
 #include <filesystem>
 #include <string>
 #include <memory>
-#include <chrono>
 
 #include <sodium.h>
 #include <curl/curl.h>
@@ -16,8 +14,8 @@
 #include "../include/arg_utils.h"
 #include "../include/sender_https.hpp"
 #include "../include/sender_ws.hpp"
-#include "../include/dir_utils.h"
-#include "../include/file_utils.h"
+#include "../include/dir_utils.hpp"
+#include "../include/send_utils.h"
 #include "../include/db_utils.hpp"
 
 int main(int argc, char** argv) { 
@@ -94,6 +92,7 @@ int main(int argc, char** argv) {
 
     // ENCRYPT / DECRYPT MODES
     auto policy = cf.policy;
+    DirectoryProcessor pr;
 
     if (policy.is_encryption_symmetric()) { // SYMMETRIC
         unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
@@ -107,7 +106,7 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            auto fn = [&](const std::string& src, const std::string& dest) -> int {
+            auto enc_sym = [&](const std::string& src, const std::string& dest) -> int {
                 return encrypt_file_symmetric(
                     key, 
                     src.c_str(), 
@@ -116,7 +115,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (process_path(cf.init_path, cf.dest_path, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (pr.process_encrypt(cf.init_path, cf.dest_path, enc_sym) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
         } else { // DECRYPT
 
@@ -128,7 +127,7 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            auto fn = [&](const std::string& src, const std::string& dest) -> int {
+            auto dec_sym = [&](const std::string& src, const std::string& dest) -> int {
                 return decrypt_file_symmetric(
                     key,
                     src.c_str(),
@@ -137,7 +136,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (process_path(cf.init_path, cf.dest_path, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (pr.process_decrypt(cf.init_path, cf.dest_path, dec_sym) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
 
     } else { // ASYMMETRIC
@@ -159,7 +158,7 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            auto fn = [&](const std::string& src, const std::string& dest) -> int {
+            auto enc_asym = [&](const std::string& src, const std::string& dest) -> int {
                 return encrypt_file_asymmetric(
                     pub_key,
                     src.c_str(),
@@ -168,7 +167,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (process_path(cf.init_path, cf.dest_path, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (pr.process_encrypt(cf.init_path, cf.dest_path, enc_asym) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
         } else { // DECRYPT
             if (load_key(cf.policy.enc_p.key_path.c_str(), pub_key, sizeof(pub_key))     != 0 ||
@@ -180,7 +179,7 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            auto fn = [&](const std::string& src, const std::string& dest) -> int {
+            auto dec_asym = [&](const std::string& src, const std::string& dest) -> int {
                 return decrypt_file_asymmetric(
                     pub_key,
                     pr_key,
@@ -190,9 +189,7 @@ int main(int argc, char** argv) {
                 );
             };
 
-            // NEEDS TO BE AUTOMATED IN CASE WHEN WE GET .enc FILES
-
-            return (process_path(cf.init_path, cf.dest_path, fn) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (pr.process_decrypt(cf.init_path, cf.dest_path, dec_asym) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
     }
 

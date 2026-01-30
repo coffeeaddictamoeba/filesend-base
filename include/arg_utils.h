@@ -1,4 +1,6 @@
 #include <cstddef>
+
+#include "helpers.h"
 #include "sender.hpp"
 
 struct FilesendConfig {

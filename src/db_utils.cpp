@@ -19,16 +19,6 @@
 #include "../include/db_utils.hpp"
 #include "../include/helpers.h"
 
-static std::string dirname_of(std::string_view path) {
-    if (path.empty()) return ".";
-    size_t pos = path.find_last_of('/');
-    if (pos == std::string::npos) return ".";
-
-    if (pos == 0) return "/";
-
-    return std::string(path.substr(0, pos));
-}
-
 SentFileDatabase::SentFileDatabase(const std::string& db_path) {
     db_path_ = dirname_of(db_path);
     db_path_ += '/' ;

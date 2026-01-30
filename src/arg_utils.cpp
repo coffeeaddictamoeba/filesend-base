@@ -296,7 +296,7 @@ void ArgParser::handle_security_settings(int argc, char** argv) {
         else {
             fprintf(
                 stderr, 
-                RED "[ERROR] Unknown argument in decrypt mode: %s\n", arg
+                RED "[ERROR] Unknown argument in encrypt/decrypt mode: %s\n", arg
             );
             return;
         }

@@ -1,6 +1,10 @@
+#pragma once
+
 #include <cstdint>
 #include <ostream>
 #include <istream>
+
+#include "defaults.h"
 
 static void u32_to_le(uint8_t out[4], uint32_t v) {
     out[0] = (uint8_t)(v);
@@ -49,4 +53,55 @@ static bool read_u64_le(std::istream& in, uint64_t& v) {
     uint8_t b[8]; if (!in.read((char*)b, 8)) return false;
     v = 0; for (int i=0;i<8;i++) v |= ((uint64_t)b[i] << (8*i));
     return true;
+}
+
+inline bool is_hidden_or_tmp(const std::string& name) {
+    if (name.empty() || name[0] == '.') return true;
+
+    constexpr const char* TEMP_EXTS[] = {
+        ".tmp",
+        ".temp",
+        "~",
+        ".part",
+        ".swp",
+    };
+
+    auto s = strlen(name.c_str());
+    for (auto ext : TEMP_EXTS) {
+        auto e = strlen(ext);
+        if (s >= e && name.compare(s-e, e, ext) == 0) return true;
+    }
+
+    return false;
+}
+
+static std::string dirname_of(std::string_view path) {
+    if (path.empty()) return ".";
+    size_t pos = path.find_last_of('/');
+    if (pos == std::string::npos) return ".";
+
+    if (pos == 0) return "/";
+
+    return std::string(path.substr(0, pos));
+}
+
+static void join(std::string& out, std::string_view dir, std::string_view name) {
+    out.clear();
+    out.reserve(dir.size() + 1 + name.size());
+    out.append(dir);
+    if (!out.empty() && out.back() != '/') out.push_back('/');
+    out.append(name);
+}
+
+inline const char* getenv_or_default(const char* env_name, const char* default_val) {
+    const char* env = std::getenv(env_name);
+    if (env) {
+        return env;
+    } else {
+        fprintf(
+            stderr,
+            YELLOW "[WARN] No %s found in environment. Using default: %s\n" RESET, env_name, default_val
+        );
+        return default_val;
+    }
 }

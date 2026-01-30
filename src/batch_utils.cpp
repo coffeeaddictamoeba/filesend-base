@@ -1,7 +1,10 @@
+#include <archive.h>
+#include <archive_entry.h>
 #include <cstdint>
 #include <cstdio>
+#include <zip.h>
 
-#include "../include/dir_utils.h"
+#include "../include/send_utils.h"
 
 FileBatch::FileBatch(std::size_t batch_size) : size(batch_size) {
     pending.reserve(size);

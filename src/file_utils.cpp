@@ -40,40 +40,6 @@ int make_readonly(const char *path) {
     return 0;
 }
 
-int match_pattern(const char* p, const char* t) {
-    size_t p_idx     = 0;
-    size_t t_idx     = 0;
-    size_t match_pos = 0; // position in text when last '*' was seen
-    size_t star_pos  = 0; // last position of '*' in pattern
-
-    size_t p_len = strlen(p);
-    size_t t_len = strlen(t);
-
-    while (t_idx < t_len) {
-        if (p_idx < p_len && p[p_idx] == '*') {
-            star_pos = p_idx++;
-            match_pos = t_idx;
-        }
-
-        else if (p_idx < p_len && (p[p_idx] == '?' || p[p_idx] == t[t_idx])) {
-            ++p_idx;
-            ++t_idx;
-        }
-
-        else if (star_pos != std::string::npos) {
-            p_idx = star_pos + 1;
-            ++match_pos;
-            t_idx = match_pos;
-        }
-
-        else return 0;
-    }
-
-    while (p_idx < p_len && p[p_idx] == '*') ++p_idx;
-
-    return p_idx == p_len;
-}
-
 int get_file_metadata(int fd, FileMetadata* md) {
     struct stat st;
     if (fstat(fd, &st) != 0) return -1;

@@ -14,141 +14,9 @@
 #include <unordered_set>
 #include <vector>
 
-#include "../include/dir_utils.h"
+#include "../include/send_utils.h"
 
 namespace fs = std::filesystem;
-
-int process_dir(const std::string& src_dir, std::string& dest_base, const std::string& pattern, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
-    bool dest_is_dir = false;
-    struct stat dstst{};
-
-    if (stat(dest_base.c_str(), &dstst) == 0) {
-        dest_is_dir = S_ISDIR(dstst.st_mode);
-    } else {
-        if (mkdir(dest_base.c_str(), 0700) == 0) {
-            dest_is_dir = true;
-        } else {
-            dest_base = src_dir;
-            dest_is_dir = true;
-        }
-    }
-
-    DIR* dir = opendir(src_dir.c_str());
-    if (!dir) {
-        perror("[ERROR] opendir src_dir");
-        return -1;
-    }
-
-    int ret = 0;
-    struct dirent* ent;
-    char path_buf[PATH_MAX];
-    while ((ent = readdir(dir)) != nullptr) {
-        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-
-        if (!pattern.empty() && !match_pattern(pattern.c_str(), ent->d_name)) continue;
-
-        snprintf(
-            path_buf, 
-            sizeof(path_buf), 
-            "%s/%s", src_dir.c_str(), ent->d_name
-        );
-
-        struct stat fst{};
-        if (stat(path_buf, &fst) != 0) {
-            perror("[WARN] stat entry");
-            ret = -1;
-            continue;
-        }
-
-        if (!S_ISREG(fst.st_mode)) continue;
-
-        std::string src = path_buf;
-        std::string dest;
-
-        if (dest_is_dir) {
-            dest = dest_base + "/" + ent->d_name;
-        } else {
-            dest = src;
-        }
-
-        if (fn(src, dest) != 0) {
-            fprintf(
-                stderr, 
-                "[WARN] Failed to process %s\n", src.c_str()
-            );
-            ret = -1;
-        }
-    }
-
-    closedir(dir);
-    return ret;
-}
-
-int process_path(const std::string& init, std::string& dest, const std::function<int(const std::string& src, const std::string& dest)>& fn) {
-    if (init.find_first_of("*?") != std::string::npos) {
-        std::string::size_type slash = init.find_last_of('/');
-        std::string src_dir;
-        std::string pattern;
-
-        if (slash == std::string::npos) {
-            src_dir = ".";
-            pattern = init;
-        } else {
-            src_dir = init.substr(0, slash);
-            pattern = init.substr(slash + 1);
-        }
-
-        struct stat st{};
-        if (stat(src_dir.c_str(), &st) != 0) {
-            perror("[ERROR] stat pattern directory");
-            return -1;
-        }
-        if (!S_ISDIR(st.st_mode)) {
-            std::fprintf(
-                stderr,
-                "[ERROR] %s is not a directory\n", src_dir.c_str()
-            );
-            return -1;
-        }
-
-        if (dest.empty() || dest == init) {
-            return process_dir(src_dir, src_dir, pattern, fn);
-        } else {;
-            return process_dir(src_dir, dest, pattern, fn);
-        }
-    }
-
-    struct stat st{};
-    if (stat(init.c_str(), &st) != 0) {
-        perror("[ERROR] stat init_path");
-        return -1;
-    }
-
-    // Single file
-    if (S_ISREG(st.st_mode)) {
-        dest = dest.empty() ? init : dest;
-
-        struct stat dstst{};
-        if (stat(dest.c_str(), &dstst) == 0 && S_ISDIR(dstst.st_mode)) {
-            auto pos = init.find_last_of('/');
-            dest += "/";
-            dest += (pos == std::string::npos) ? init : init.substr(pos + 1);
-        }
-
-        return fn(init, dest);
-    }
-
-    if (!S_ISDIR(st.st_mode)) {
-        fprintf(
-            stderr,
-            "[ERROR] %s is neither file nor directory\n", init.c_str()
-        );
-        return -1;
-    }
-
-    const std::string pattern = "";
-    return process_dir(init, dest, pattern, fn);
-}
 
 // Sending helpers
 static inline int open_dup_readonly(const fs::path& p) {
@@ -274,13 +142,13 @@ bool FileSender::process_and_send_one_file(const fs::path& in, const FilesendPol
 bool FileSender::process_one_batch(FileBatch& b, const fs::path& in, fs::path& archive, const FilesendPolicy& policy, const TempDirsConfig& dc, std::unordered_set<std::string>* processed, uint32_t tag = 0) {
     (void)policy;
 
-    if (!b.ready) {
-        b.add(in.string());
-    }
+    // ready check *before* addition
+    if (!b.ready) b.add(in.string());
 
+    // ready check *after* addition (could have changed)
     if (!b.ready) return true;
 
-    archive = dc.outtmp_dir / (b.get_name_timestamped(tag) + ".batch");
+    archive = dc.outtmp_dir / b.get_name_timestamped(tag);
 
     printf("[INFO] Batch %d archive: %s\n", b.get_id(), archive.c_str());
 
@@ -561,6 +429,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
 
                 // Move claimed -> workdir (exclusive)
                 fs::path mine = workdirs[i] / claimed.filename();
+
                 if (!rename_successful(claimed, mine)) {
                     // Can't take ownership; just finish qe item
                     finish_qe_item();
@@ -631,7 +500,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                     worker_batches[i].ready = true;
 
                     fs::path archive;
-                    fs::path dummy = workdirs[i] / ".flush"; // not used when ready==true
+                    fs::path dummy;
 
                     bool ok = process_one_batch(worker_batches[i], dummy, archive, policy, dc, nullptr, (uint32_t)i);
 
@@ -705,7 +574,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
             continue;
         }
 
-        const fs::path claimed = dc.claimed_dir / (name + ".c." + tid_unique_suffix(::getpid()));
+        const fs::path claimed = dc.claimed_dir / name;
 
         if (!rename_successful(e, claimed)) {
             if (db_) db_->rollback(f);
@@ -747,7 +616,8 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                 return;
             }
 
-            const fs::path claimed = dc.claimed_dir / (name + ".c." + tid_unique_suffix(::getpid()));
+            const fs::path claimed = dc.claimed_dir / name
+            ;
             if (!rename_successful(ready_file, claimed)) {
                 if (db_) db_->rollback(f);
                 return;
