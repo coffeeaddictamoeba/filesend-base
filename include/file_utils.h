@@ -23,7 +23,7 @@
 #define ENC_FLAG_SYMMETRIC  (1u << 1)
 #define ENC_FLAG_ALL        (1u << 2)
 #define ENC_FLAG_ARCHIVE    (1u << 3)
-#define ENC_FLAG_RESERVED2  (1u << 4)
+#define ENC_FLAG_FORCE      (1u << 4)
 
 struct locked_fd {
     int fd = -1;

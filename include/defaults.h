@@ -53,4 +53,6 @@ constexpr const char* INBOX_OUTBOX_DIR  = ".filesend_outbox";
 constexpr const char* INBOX_ARCHIVE_DIR = ".filesend_archive";
 constexpr const char* INBOX_OUTTMP_DIR  = ".filesend_tmp";
 
+constexpr const char* ENC = ".enc";
+
 #endif // DEFAULTS_H

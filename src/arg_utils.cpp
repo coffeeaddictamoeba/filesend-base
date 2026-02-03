@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 
 #include "../include/arg_utils.h"
@@ -29,10 +30,10 @@ void ArgParser::usage(const char* prog) const {
         "[--batch <n> <format>] [--archive] [--nthreads <n>]\n" 
 
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>]\n"
+        "[--dest <file>] [--timeout <n>] [--archive]\n"
 
         "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>]\n"
+        "[--dest <file>] [--timeout <n>] [--archive]\n"
         
         "  %s verify <path> <sha256>\n",
         prog, prog, prog, prog
@@ -293,6 +294,8 @@ void ArgParser::handle_security_settings(int argc, char** argv) {
         if (strcmp(arg, "--all") == 0)          { config_.policy.enc_p.flags |= ENC_FLAG_ALL; }
         else if (strcmp(arg, "--dest") == 0)    { handle_mode_dest(i, argc, argv); }
         else if (strcmp(arg, "--timeout") == 0) { handle_mode_timeout(i, argc, argv); }
+        else if (strcmp(arg, "--archive") == 0) { config_.policy.enc_p.flags |= ENC_FLAG_ARCHIVE; }
+        else if (strcmp(arg, "--force") == 0)   { config_.policy.enc_p.flags |= ENC_FLAG_FORCE; }
         else {
             fprintf(
                 stderr, 
@@ -302,7 +305,11 @@ void ArgParser::handle_security_settings(int argc, char** argv) {
         }
     }
 
-    if (config_.dest_path.empty()) config_.dest_path = config_.init_path;
+    if (config_.dest_path.empty()) {
+        config_.dest_path = (config_.mode == "encrypt") // potential point for optimization
+            ? config_.init_path + ENC // set ".enc" suffix by default
+            : strip_suffix(config_.init_path, ENC);
+    }
 }
 
 void ArgParser::handle_verify(int argc, char** argv) {

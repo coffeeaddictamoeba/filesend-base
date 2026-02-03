@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
+#include <fcntl.h>
 #include <filesystem>
 #include <string>
 #include <memory>
@@ -92,7 +93,7 @@ int main(int argc, char** argv) {
 
     // ENCRYPT / DECRYPT MODES
     auto policy = cf.policy;
-    DirectoryProcessor pr;
+    DirectoryProcessor dp;
 
     if (policy.is_encryption_symmetric()) { // SYMMETRIC
         unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
@@ -106,16 +107,18 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            auto enc_sym = [&](const std::string& src, const std::string& dest) -> int {
-                return encrypt_file_symmetric(
+            auto enc_sym = [&](int in_fd, const char* dst) -> int {
+                return encrypt_file_symmetric_fd(
                     key, 
-                    src.c_str(), 
-                    dest.c_str(), 
+                    in_fd, 
+                    dst, 
                     policy.is_encryption_for_all()
                 );
             };
 
-            return (pr.process_encrypt(cf.init_path, cf.dest_path, enc_sym) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (dp.process_encrypt(cf.init_path, cf.dest_path, policy.is_encryption_with_archive(), policy.is_encryption_forced(), enc_sym) == 0) 
+                ? EXIT_SUCCESS 
+                : EXIT_FAILURE;
 
         } else { // DECRYPT
 
@@ -127,20 +130,22 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            auto dec_sym = [&](const std::string& src, const std::string& dest) -> int {
-                return decrypt_file_symmetric(
+            auto dec_sym = [&](int in_fd, const char* dst) -> int {
+                return decrypt_file_symmetric_fd(
                     key,
-                    src.c_str(),
-                    dest.c_str(),
+                    in_fd,
+                    dst,
                     policy.is_encryption_for_all()
                 );
             };
 
-            return (pr.process_decrypt(cf.init_path, cf.dest_path, dec_sym) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (dp.process_decrypt(cf.init_path, cf.dest_path, policy.is_encryption_with_archive(), policy.is_encryption_forced(), dec_sym) == 0) 
+                ? EXIT_SUCCESS 
+                : EXIT_FAILURE;
         }
 
     } else { // ASYMMETRIC
-
+ 
         unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
         unsigned char pr_key [crypto_box_SECRETKEYBYTES];
 
@@ -158,18 +163,21 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            auto enc_asym = [&](const std::string& src, const std::string& dest) -> int {
-                return encrypt_file_asymmetric(
+            auto enc_asym = [&](int in_fd, const char* dst) -> int {
+                return encrypt_file_asymmetric_fd(
                     pub_key,
-                    src.c_str(),
-                    dest.c_str(),
+                    in_fd,
+                    dst,
                     policy.is_encryption_for_all()
                 );
             };
 
-            return (pr.process_encrypt(cf.init_path, cf.dest_path, enc_asym) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (dp.process_encrypt(cf.init_path, cf.dest_path, policy.is_encryption_with_archive(), policy.is_encryption_forced(), enc_asym) == 0) 
+                ? EXIT_SUCCESS 
+                : EXIT_FAILURE;
 
         } else { // DECRYPT
+
             if (load_key(cf.policy.enc_p.key_path.c_str(), pub_key, sizeof(pub_key))     != 0 ||
                 load_key(cf.policy.enc_p.dec_key_path.c_str(), pr_key,  sizeof(pr_key))  != 0) {
                 fprintf(
@@ -179,21 +187,23 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
             }
 
-            auto dec_asym = [&](const std::string& src, const std::string& dest) -> int {
-                return decrypt_file_asymmetric(
+            auto dec_asym = [&](int in_fd, const char* dst) -> int {
+                return decrypt_file_asymmetric_fd(
                     pub_key,
                     pr_key,
-                    src.c_str(),
-                    dest.c_str(),
+                    in_fd,
+                    dst,
                     policy.is_encryption_for_all()
                 );
             };
 
-            return (pr.process_decrypt(cf.init_path, cf.dest_path, dec_asym) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            return (dp.process_decrypt(cf.init_path, cf.dest_path, policy.is_encryption_with_archive(), policy.is_encryption_forced(), dec_asym) == 0) 
+                ? EXIT_SUCCESS 
+                : EXIT_FAILURE;
         }
     }
 
     fprintf(stderr, RED "[ERROR] Wrong arguments specified\n" RESET);
 
-    return EXIT_FAILURE;
+    return EXIT_FAILURE; 
 }

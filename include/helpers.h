@@ -75,23 +75,61 @@ inline bool is_hidden_or_tmp(const std::string& name) {
     return false;
 }
 
-static std::string dirname_of(std::string_view path) {
-    if (path.empty()) return ".";
-    size_t pos = path.find_last_of('/');
-    if (pos == std::string::npos) return ".";
-
+static inline std::string_view sv_dirname(std::string_view p) {
+    if (p.empty()) return ".";
+    size_t pos = p.find_last_of('/');
+    if (pos == std::string_view::npos) return ".";
     if (pos == 0) return "/";
-
-    return std::string(path.substr(0, pos));
+    return p.substr(0, pos);
 }
 
-static void join(std::string& out, std::string_view dir, std::string_view name) {
+static inline std::string_view sv_basename(std::string_view p) {
+    size_t pos = p.find_last_of('/');
+    return (pos == std::string_view::npos) ? p : p.substr(pos + 1);
+}
+
+static inline bool has_glob(std::string_view p) {
+    return p.find_first_of("*?") != std::string_view::npos;
+}
+
+static inline void join2(std::string& out, std::string_view a, std::string_view b) {
+    // out = a + "/" + b  (handles a="." or "/")
     out.clear();
-    out.reserve(dir.size() + 1 + name.size());
-    out.append(dir);
+    out.reserve(a.size() + 1 + b.size());
+    out.append(a.data(), a.size());
     if (!out.empty() && out.back() != '/') out.push_back('/');
-    out.append(name);
+    out.append(b.data(), b.size());
 }
+static inline bool has_suffix(std::string_view s, std::string_view suf) {
+    return s.size() >= suf.size() && s.substr(s.size() - suf.size()) == suf;
+}
+
+static inline std::string_view strip_suffix_sv(std::string_view s, std::string_view suf) {
+    return has_suffix(s, suf) ? s.substr(0, s.size() - suf.size()) : s;
+}
+
+static inline void append_suffix(std::string& out, std::string_view base, std::string_view suf) {
+    out.assign(base.data(), base.size());
+    out.append(suf.data(), suf.size());
+}
+
+static inline bool equal_paths(std::string_view dst, std::string_view src_dir, std::string_view src_name) {
+    std::string tmp;
+    tmp.reserve(src_dir.size() + 1 + src_name.size());
+    tmp.append(src_dir.data(), src_dir.size());
+    if (!tmp.empty() && tmp.back() != '/') tmp.push_back('/');
+    tmp.append(src_name.data(), src_name.size());
+    return dst == tmp;
+}
+
+static inline std::string_view strip_suffix(std::string_view s, std::string_view suf) {
+    auto s_size = s.size();
+    auto suf_size = suf.size();
+    return s_size >= suf_size && s.substr(s_size - suf_size) == suf 
+        ? s.substr(0, s_size - suf_size) 
+        : s;
+}
+
 
 inline const char* getenv_or_default(const char* env_name, const char* default_val) {
     const char* env = std::getenv(env_name);

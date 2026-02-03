@@ -48,6 +48,7 @@ struct FilesendPolicy {
     bool is_encryption_symmetric()    const noexcept { return enc_p.flags & ENC_FLAG_SYMMETRIC; }
     bool is_encryption_for_all()      const noexcept { return enc_p.flags & ENC_FLAG_ALL; }
     bool is_encryption_with_archive() const noexcept { return enc_p.flags & ENC_FLAG_ARCHIVE; }
+    bool is_encryption_forced()       const noexcept { return enc_p.flags & ENC_FLAG_FORCE; }
 };
 
 class Sender {

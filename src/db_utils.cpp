@@ -20,7 +20,7 @@
 #include "../include/helpers.h"
 
 SentFileDatabase::SentFileDatabase(const std::string& db_path) {
-    db_path_ = dirname_of(db_path);
+    db_path_ = sv_dirname(db_path);
     db_path_ += '/' ;
     db_path_ += DB_NAME;
 

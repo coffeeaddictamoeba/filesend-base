@@ -19,6 +19,7 @@ struct FilesendConfig {
 #endif
 
     int use_ws;
+    int force;
 };
 
 class ArgParser {
