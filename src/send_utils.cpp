@@ -83,15 +83,13 @@ bool FileSender::process_one_file(const fs::path& in, fs::path& out, const Files
 
     const fs::path name = in.filename();
 
-    out  = dc.outbox / (policy.is_encryption_needed() ? fs::path(name.string() + ".enc") : name);
+    out  = dc.outbox / (policy.is_encryption_needed() ? fs::path(name.string() + ENC) : name);
 
     if (policy.is_encryption_needed()) {
         if (!encrypt_to_path(policy, in, out)) {
             fprintf(stderr, RED "[ERROR] Encryption failed for %s\n" RESET, out.c_str());
             return false;
-        } else {
-            fs::remove(in); // remove initial file
-        }
+        } // file removal is handled in encrypt_to_path
     } else {
         fs::copy_file(in, out);
     }

@@ -306,9 +306,7 @@ void ArgParser::handle_security_settings(int argc, char** argv) {
     }
 
     if (config_.dest_path.empty()) {
-        config_.dest_path = (config_.mode == "encrypt") // potential point for optimization
-            ? config_.init_path + ENC // set ".enc" suffix by default
-            : strip_suffix(config_.init_path, ENC);
+        config_.dest_path = strip_suffix(config_.init_path, ENC);
     }
 }
 

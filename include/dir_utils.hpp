@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <sched.h>
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
@@ -67,7 +68,8 @@ private:
         auto pos = init.find_first_of("*?");
         if (pos != std::string_view::npos) {
             dp.mode = DestPathMode::DEST_DIR;
-            dp.dest = init.substr(0, pos);
+            dp.dest.assign(dest.data(), dest.size());
+            dp.dest = dp.dest.substr(0, dp.dest.find_last_of('/'));
             return dp;
         }
 
@@ -102,21 +104,22 @@ private:
         return dp;
     }
 
-    static void map_dest_path(std::string& dst_out, const DestPath& plan, std::string_view src_dir, std::string_view name, std::string_view name_override = {}) {
-        std::string_view final_name = name_override.empty() ? name : name_override;
+    static void map_dest_path(std::string& dst_out, const DestPath& plan, std::string_view src_dir, std::string_view src_name, std::string_view name_override = {}) {
+        std::string_view name = name_override.empty() ? src_name : name_override;
 
         switch (plan.mode) {
             case DestPathMode::IN_PLACE:
-                join2(dst_out, src_dir, final_name);
+                join2(dst_out, src_dir, name);
                 break;
             case DestPathMode::DEST_DIR:
-                join2(dst_out, plan.dest, final_name);
+                join2(dst_out, plan.dest, name);
                 break;
             case DestPathMode::DEST_FILE:
                 dst_out.assign(plan.dest);
                 break;
         }
     }
+
 
     template<class OnFile>
     static int process_dir_openat(std::string_view dir_sv, std::string_view pattern, OnFile&& on_file) {
@@ -249,8 +252,6 @@ private:
     }
 
 public:
-    // Encrypt: enc_fn(in_fd, dst_path) -> int
-    //  Default: skip *.enc inputs
     template<class EncryptFn>
     int process_encrypt(std::string_view init, std::string_view dest, bool archive, bool force, EncryptFn&& enc_fn) {
         DestPath plan = init_dest_path(init, dest);
@@ -259,23 +260,30 @@ public:
         std::string dst;
         std::string out_name;
         int rc_local = 0;
-        bool same_path;
 
         int rc_walk = process_path_openat(init, [&](std::string_view src_dir, const char* src_name_c, int dfd, int in_fd) -> bool {
             std::string_view src_name(src_name_c);
 
             if (!force && sv_ends_with(src_name, ENC)) return true;
 
+            bool same_path = false;
+
             if (plan.mode == DestPathMode::DEST_FILE) {
                 dst.assign(plan.dest);
+
+                if (!sv_ends_with(std::string_view(dst), ENC)) dst += ENC;
+
                 std::string src_full;
                 join2(src_full, src_dir, src_name);
-                same_path = (src_full == dst);
+                if (src_full == dst) {
+                    append_suffix(out_name, src_name_c, ENC);
+                    join2(dst, src_dir, out_name);
+                    same_path = false;
+                }
+
             } else {
-                // IN_PLACE / DEST_DIR: always *.enc
                 append_suffix(out_name, src_name_c, ENC);
                 map_dest_path(dst, plan, src_dir, src_name, out_name);
-                same_path = false;
             }
 
             if (enc_fn(in_fd, dst.c_str()) != 0) {
@@ -288,15 +296,17 @@ public:
                 return true;
             }
 
-            if (!archive && !same_path) {
-                // Remove original only after success
-                if (::unlinkat(dfd, src_name_c, 0) != 0) {
-                    fprintf(
-                        stderr, 
-                        "[ERROR] unlinkat failed (%.*s/%s): %s\n",
-                        (int)src_dir.size(), src_dir.data(), src_name_c, strerror(errno)
-                    );
-                    // not fatal for encryption result
+            if (!archive && dfd >= 0) {
+                std::string src_full;
+                join2(src_full, src_dir, src_name);
+                if (src_full != dst) {
+                    if (::unlinkat(dfd, src_name_c, 0) != 0) {
+                        fprintf(
+                            stderr, 
+                            "[WARN] unlinkat failed (%.*s/%s): %s\n",
+                            (int)src_dir.size(), src_dir.data(), src_name_c, strerror(errno)
+                        );
+                    }
                 }
             }
 
@@ -306,8 +316,7 @@ public:
         return (rc_walk == 0 && rc_local == 0) ? 0 : -1;
     }
 
-    // Decrypt: dec_fn(in_fd, dst_path) -> int
-    // Default: process ONLY *.enc
+
     template<class DecryptFn>
     int process_decrypt(std::string_view init, std::string_view dest, bool archive, bool force, DecryptFn&& dec_fn) {
         DestPath plan = init_dest_path(init, dest);
@@ -316,7 +325,6 @@ public:
         std::string dst;
         std::string out_name;
         int rc_local = 0;
-        bool same_path;
 
         int rc_walk = process_path_openat(init, [&](std::string_view src_dir, const char* src_name_c, int dfd, int in_fd) -> bool {
             std::string_view src_name(src_name_c);
@@ -324,26 +332,23 @@ public:
 
             if (!force && !has_enc) return true;
 
+            bool same_path = false;
+
+            std::string_view dec_name = has_enc ? src_name.substr(0, src_name.size() - strlen(ENC)) : src_name;
+
             if (plan.mode == DestPathMode::DEST_FILE) {
-                dst.assign(plan.dest);
-                std::string src_full;
-                join2(src_full, src_dir, src_name);
-                same_path = (src_full == dst);
+                has_enc ? dst.assign(plan.dest.data(), plan.dest.size() - strlen(ENC)) : dst.assign(plan.dest);
             } else {
-                if (has_enc) {
-                    // strip .enc
-                    out_name.assign(src_name.data(), src_name.size() - 4);
-                } else {
-                    append_suffix(out_name, src_name_c, ".dec");
-                }
-                map_dest_path(dst, plan, src_dir, src_name, out_name);
-                same_path = false;
+                map_dest_path(dst, plan, src_dir, src_name, dec_name);
             }
+
+            std::string src_full;
+            join2(src_full, src_dir, src_name);
+            same_path = (src_full == dst);
 
             int drc = dec_fn(in_fd, dst.c_str());
             if (drc != 0) {
                 if (force && !has_enc) {
-                    // Treat as NOT_ENCRYPTED / SKIP in force mode (not an error)
                     fprintf(
                         stdout, 
                         "[SKIP] Not encrypted (force): %.*s/%s\n",
@@ -361,7 +366,7 @@ public:
                 return true;
             }
 
-            if (!archive && !same_path) {
+            if (!archive && !same_path && dfd >= 0) {
                 if (::unlinkat(dfd, src_name_c, 0) != 0) {
                     fprintf(
                         stderr, 
@@ -376,4 +381,5 @@ public:
 
         return (rc_walk == 0 && rc_local == 0) ? 0 : -1;
     }
+
 };

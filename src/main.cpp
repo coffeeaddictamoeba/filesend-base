@@ -116,9 +116,15 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (dp.process_encrypt(cf.init_path, cf.dest_path, policy.is_encryption_with_archive(), policy.is_encryption_forced(), enc_sym) == 0) 
-                ? EXIT_SUCCESS 
-                : EXIT_FAILURE;
+            int rc = dp.process_encrypt(
+                cf.init_path, 
+                cf.dest_path, 
+                policy.is_encryption_with_archive(), 
+                policy.is_encryption_forced(), 
+                enc_sym
+            );
+
+            return (rc == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
         } else { // DECRYPT
 
@@ -139,9 +145,15 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (dp.process_decrypt(cf.init_path, cf.dest_path, policy.is_encryption_with_archive(), policy.is_encryption_forced(), dec_sym) == 0) 
-                ? EXIT_SUCCESS 
-                : EXIT_FAILURE;
+            int rc = dp.process_decrypt(
+                cf.init_path, 
+                cf.dest_path, 
+                policy.is_encryption_with_archive(), 
+                policy.is_encryption_forced(), 
+                dec_sym
+            );
+
+            return (rc == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
 
     } else { // ASYMMETRIC
@@ -172,9 +184,15 @@ int main(int argc, char** argv) {
                 );
             };
 
-            return (dp.process_encrypt(cf.init_path, cf.dest_path, policy.is_encryption_with_archive(), policy.is_encryption_forced(), enc_asym) == 0) 
-                ? EXIT_SUCCESS 
-                : EXIT_FAILURE;
+            int rc = dp.process_encrypt(
+                cf.init_path, 
+                cf.dest_path, 
+                policy.is_encryption_with_archive(), 
+                policy.is_encryption_forced(),
+                 enc_asym
+            );
+
+            return (rc == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 
         } else { // DECRYPT
 
@@ -193,13 +211,19 @@ int main(int argc, char** argv) {
                     pr_key,
                     in_fd,
                     dst,
-                    policy.is_encryption_for_all()
+                    policy.is_encryption_for_all() 
                 );
             };
 
-            return (dp.process_decrypt(cf.init_path, cf.dest_path, policy.is_encryption_with_archive(), policy.is_encryption_forced(), dec_asym) == 0) 
-                ? EXIT_SUCCESS 
-                : EXIT_FAILURE;
+            int rc = dp.process_decrypt(
+                cf.init_path, 
+                cf.dest_path, 
+                policy.is_encryption_with_archive(), 
+                policy.is_encryption_forced(), 
+                dec_asym
+            );
+
+            return ( rc == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
     }
 
