@@ -2,25 +2,7 @@
 
 #include "helpers.h"
 #include "sender.hpp"
-
-struct FilesendConfig {
-    FilesendPolicy policy;
-
-    std::string mode;          // "send" / "encrypt" / "decrypt" / "verify"
-    std::string init_path;     // file or directory
-    std::string dest_path;
-    std::string device_id;
-    
-    std::string batch_format;
-    std::size_t batch_size;
-
-#ifdef USE_MULTITHREADING
-    int nthreads;
-#endif
-
-    int use_ws;
-    int force;
-};
+#include "config_utils.h"
 
 class ArgParser {
 public:
@@ -34,6 +16,8 @@ public:
 
 private:
     void init_config();
+    void init_config_cli();
+    void init_config_ini();
 
     void handle_send(int argc, char** argv);
     void handle_encrypt(int argc, char** argv);
@@ -57,4 +41,5 @@ private:
 private:
     FilesendConfig config_;
     std::unordered_map<std::string, std::function<void(int, char**)>> mode_handlers_;
+    int argc_;
 };

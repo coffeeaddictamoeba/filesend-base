@@ -14,7 +14,8 @@
 #define YELLOW  "\033[33m"      // Warnings
 #define GREEN   "\033[32m"      // Success
 
-#define DB_NAME ".filesend_cache"
+#define FILESEND_DB_PATH ".filesend_cache"
+#define FILESEND_CONFIG_PATH "filesend_config"
 
 #define DEFAULT_COMPRESSION_FORMAT "zip"
 

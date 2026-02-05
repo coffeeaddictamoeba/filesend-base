@@ -22,7 +22,7 @@
 SentFileDatabase::SentFileDatabase(const std::string& db_path) {
     db_path_ = sv_dirname(db_path);
     db_path_ += '/' ;
-    db_path_ += DB_NAME;
+    db_path_ += FILESEND_DB_PATH;
 
     fprintf(
         stderr,

@@ -100,26 +100,10 @@ static inline void join2(std::string& out, std::string_view a, std::string_view 
     if (!out.empty() && out.back() != '/') out.push_back('/');
     out.append(b.data(), b.size());
 }
-static inline bool has_suffix(std::string_view s, std::string_view suf) {
-    return s.size() >= suf.size() && s.substr(s.size() - suf.size()) == suf;
-}
-
-static inline std::string_view strip_suffix_sv(std::string_view s, std::string_view suf) {
-    return has_suffix(s, suf) ? s.substr(0, s.size() - suf.size()) : s;
-}
 
 static inline void append_suffix(std::string& out, std::string_view base, std::string_view suf) {
     out.assign(base.data(), base.size());
     out.append(suf.data(), suf.size());
-}
-
-static inline bool equal_paths(std::string_view dst, std::string_view src_dir, std::string_view src_name) {
-    std::string tmp;
-    tmp.reserve(src_dir.size() + 1 + src_name.size());
-    tmp.append(src_dir.data(), src_dir.size());
-    if (!tmp.empty() && tmp.back() != '/') tmp.push_back('/');
-    tmp.append(src_name.data(), src_name.size());
-    return dst == tmp;
 }
 
 static inline std::string_view strip_suffix(std::string_view s, std::string_view suf) {
@@ -130,6 +114,21 @@ static inline std::string_view strip_suffix(std::string_view s, std::string_view
         : s;
 }
 
+static inline std::string_view trim(std::string_view s) {
+    while (!s.empty() && std::isspace((unsigned char)s.front())) s.remove_prefix(1);
+    while (!s.empty() && std::isspace((unsigned char)s.back()))  s.remove_suffix(1);
+    return s;
+}
+
+static inline bool ieq(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i])) {
+            return false;
+        }
+    }
+    return true;
+}
 
 inline const char* getenv_or_default(const char* env_name, const char* default_val) {
     const char* env = std::getenv(env_name);

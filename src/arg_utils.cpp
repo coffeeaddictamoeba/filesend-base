@@ -2,6 +2,7 @@
 #include <cstring>
 #include <filesystem>
 
+#include "../include/config_utils.h"
 #include "../include/arg_utils.h"
 
 namespace fs = std::filesystem; // maybe will be removed because of cf.init_path being a pattern
@@ -30,10 +31,10 @@ void ArgParser::usage(const char* prog) const {
         "[--batch <n> <format>] [--archive] [--nthreads <n>]\n" 
 
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>] [--archive]\n"
+        "[--dest <file>] [--force] [--archive]\n"
 
         "  %s decrypt <path> [--symmetric|--asymmetric] [--all] "
-        "[--dest <file>] [--timeout <n>] [--archive]\n"
+        "[--dest <file>] [--force] [--archive]\n"
         
         "  %s verify <path> <sha256>\n",
         prog, prog, prog, prog
@@ -63,15 +64,31 @@ void ArgParser::init_config() {
     config_.policy.enc_p.key_path = "";
 }
 
+void ArgParser::init_config_cli() { init_config(); }
+
+void ArgParser::init_config_ini() {
+    init_config();
+
+    GlobalFilesendConfig gcfg(FILESEND_CONFIG_PATH);
+    config_ = gcfg.load();
+    return;
+}
+
 int ArgParser::parse(int argc, char** argv) {
     if (argc < 3) {
         usage(argv[0]);
         return -1;
     }
 
-    init_config();
-
-    config_.mode = argv[1];     
+    if (argc > 3) init_config_cli();
+    else {
+        init_config_ini();
+        config_.mode = argv[1];
+        config_.init_path = argv[2];
+        return 0;
+    }
+    
+    config_.mode = argv[1];
     if (mode_handlers_.find(config_.mode) != mode_handlers_.end()) {
         mode_handlers_[config_.mode](argc, argv);
     } else {
@@ -235,10 +252,6 @@ void ArgParser::handle_send(int argc, char** argv) {
             return;
         }
     }
-
-// #ifdef USE_MULTITHREADING
-//     if (config_.nthreads > 1 || config_.nthreads <= 0) config_.batch_size = 1; // safety measure for now, will be fixed later
-// #endif
 }
 
 void ArgParser::handle_key_mode(const char* flag, const char* mode) {
@@ -293,7 +306,7 @@ void ArgParser::handle_security_settings(int argc, char** argv) {
 
         if (strcmp(arg, "--all") == 0)          { config_.policy.enc_p.flags |= ENC_FLAG_ALL; }
         else if (strcmp(arg, "--dest") == 0)    { handle_mode_dest(i, argc, argv); }
-        else if (strcmp(arg, "--timeout") == 0) { handle_mode_timeout(i, argc, argv); }
+        else if (strcmp(arg, "--timeout") == 0) { handle_mode_timeout(i, argc, argv); }      // unavailable for now
         else if (strcmp(arg, "--archive") == 0) { config_.policy.enc_p.flags |= ENC_FLAG_ARCHIVE; }
         else if (strcmp(arg, "--force") == 0)   { config_.policy.enc_p.flags |= ENC_FLAG_FORCE; }
         else {

@@ -1,0 +1,26 @@
+# Example
+
+[global]
+device_id = pi
+cert_path = test/ca_cert.pem
+security_info = true
+use_config = true
+
+[send]
+url = ws://0.0.0.0:8444/ws
+use_ws = true
+timeout = 5
+retry = 3
+nthreads = 3
+batch_size = 1
+batch_format = zip
+
+[crypto]
+mode = asymmetric
+all     = true
+archive = false
+force   = false
+pub_key_path = test/pub_key.bin
+pr_key_path  = test/pr_key.bin
+# sym_key_path = test/sym_key.bin   # do not use both key modes simultaneously
+dest_path = test/plain_files/
