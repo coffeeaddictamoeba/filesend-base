@@ -1,0 +1,42 @@
+# Example of server config
+
+[global]
+security_info = true
+use_config = true
+
+[server]
+host = 0.0.0.0
+port = 8444
+
+[paths]
+incoming_dir  = incoming
+decrypted_dir = decrypted
+
+[limits]
+max_file_mb     = 32
+max_json_kb     = 16
+idle_timeout_s  = 30
+ping_interval_s = 20
+ping_timeout_s  = 20
+
+[auth]
+require_auth = false
+token_file   = devtokens.json
+
+[dedup]
+enable = true
+db_path = received_files.sqlite3
+
+[tls]
+# If cert/key are empty or absent => runs with no TLS
+cert_path = certs/server.crt
+key_path  = keys/server.key
+
+[filesend]
+bin_path = bin/filesend
+decrypt_timeout_s = 60
+
+[logging]
+level = INFO
+# If empty => terminal-only
+file  = logs/server.log

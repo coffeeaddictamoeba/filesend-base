@@ -7,8 +7,15 @@ security_info = true
 use_config = true
 
 [send]
-url = ws://0.0.0.0:8444/ws
+
+# http/https
+# url = https://Test:8443/upload
+# use_ws = false
+
+# websocket
+url = wss://0.0.0.0:8444
 use_ws = true
+
 timeout = 5
 retry = 3
 nthreads = 3

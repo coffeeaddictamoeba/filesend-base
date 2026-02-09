@@ -5,7 +5,7 @@
 #include "../include/config_utils.h"
 #include "../include/arg_utils.h"
 
-namespace fs = std::filesystem; // maybe will be removed because of cf.init_path being a pattern
+namespace fs = std::filesystem;
 
 ArgParser::ArgParser() {
     config_ = {};

@@ -1,3 +1,4 @@
+#include <curl/curl.h>
 #include <stdexcept>
 #include <thread>
 
@@ -5,14 +6,12 @@
 
 HttpsSender::HttpsSender(const std::string& device_id, FilesendPolicy& policy) : Sender(policy), device_id_(device_id), policy_(policy) {
     curl_ = curl_easy_init();
-    if (!curl_) {
-        throw std::runtime_error("curl_easy_init failed");
-    }
+    if (!curl_) throw std::runtime_error("curl_easy_init failed");
 
     curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 2L);
-    if (!policy.cert_path.empty()) {
-        curl_easy_setopt(curl_, CURLOPT_CAINFO, policy.cert_path.c_str());
+    if (!policy_.cert_path.empty()) {
+        curl_easy_setopt(curl_, CURLOPT_CAINFO, policy_.cert_path.c_str());
     }
 }
 
@@ -21,6 +20,12 @@ HttpsSender::~HttpsSender() {
         curl_easy_cleanup(curl_);
         curl_ = nullptr;
     }
+}
+
+static size_t write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    auto* s = static_cast<std::string*>(userdata);
+    s->append(ptr, size * nmemb);
+    return size * nmemb;
 }
 
 bool HttpsSender::_send_file(const std::string& file_path) {
@@ -63,6 +68,10 @@ bool HttpsSender::_send_file(const std::string& file_path) {
     curl_easy_setopt(curl_, CURLOPT_URL, policy_.url.c_str());
     curl_easy_setopt(curl_, CURLOPT_MIMEPOST, mime);
 
+    std::string response;
+    curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &response);
+
     CURLcode res = curl_easy_perform(curl_);
     bool ok = false;
 
@@ -82,13 +91,17 @@ bool HttpsSender::_send_file(const std::string& file_path) {
             ok = true;
         } else {
             fprintf(
-                stderr,
-                RED "[ERROR] HTTPS: server returned HTTP %ld for %s\n" RESET, http_code, file_path.c_str()
+                stderr, 
+                RED "[ERROR] HTTPS: server returned HTTP %ld for %s\nResponse: %s\n" RESET,
+                http_code, file_path.c_str(), response.c_str()
             );
+
         }
     }
 
+    curl_easy_setopt(curl_, CURLOPT_MIMEPOST, nullptr);
     curl_mime_free(mime);
+
     return ok;
 }
 
@@ -104,12 +117,10 @@ bool HttpsSender::_send_end() {
     curl_mime* mime = curl_mime_init(curl_);
     if (!mime) return false;
 
-    // end flag
     curl_mimepart* end = curl_mime_addpart(mime);
     curl_mime_name(end, "end");
     curl_mime_data(end, "1", CURL_ZERO_TERMINATED);
 
-    // device_id
     curl_mimepart* dev = curl_mime_addpart(mime);
     curl_mime_name(dev, "device_id");
     curl_mime_data(dev, device_id_.c_str(), CURL_ZERO_TERMINATED);
@@ -117,24 +128,33 @@ bool HttpsSender::_send_end() {
     curl_easy_setopt(curl_, CURLOPT_URL, policy_.url.c_str());
     curl_easy_setopt(curl_, CURLOPT_MIMEPOST, mime);
 
-    CURLcode res = curl_easy_perform(curl_);
-    bool ok = false;
+    std::string response;
+    curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &response);
 
-    if (res != CURLE_OK) {
-        fprintf(
-            stderr,
-            RED "[ERROR] HTTPS: send_end failed: %s\n" RESET, curl_easy_strerror(res)
-        );
-    } else {
-        fprintf(
-            stdout,
-            "[HTTPS] End-of-stream signal sent\n"
-        );
-        ok = true;
+    CURLcode res = curl_easy_perform(curl_);
+
+    long http_code = 0;
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl_, CURLINFO_RESPONSE_CODE, &http_code);
     }
 
+    curl_easy_setopt(curl_, CURLOPT_MIMEPOST, nullptr);
     curl_mime_free(mime);
-    return ok;
+
+    if (res != CURLE_OK) {
+        fprintf(stderr, RED "[ERROR] HTTPS: send_end failed: %s\n" RESET, curl_easy_strerror(res));
+        return false;
+    }
+
+    if (http_code == 200 || http_code == 201) {
+        fprintf(stdout, "[HTTPS] End-of-stream signal sent (HTTP %ld)\n", http_code);
+        return true;
+    }
+
+    fprintf(stderr, RED "[ERROR] HTTPS: send_end got HTTP %ld\nResponse: %s\n" RESET,
+            http_code, response.c_str());
+    return false;
 }
 
 bool HttpsSender::send_end() {

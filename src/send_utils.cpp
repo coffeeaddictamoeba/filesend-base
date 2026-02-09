@@ -382,6 +382,9 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                 if (db_) db_->commit(key);
                 if (policy.is_encryption_with_archive()) {
                     rename_successful(enc, dc.archive / enc.filename());
+                } else {
+                    printf("[INFO] No archiving specified. Removing encryption artifact: %s\n", enc.c_str());
+                    fs::remove(enc);
                 }
             }
 
