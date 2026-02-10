@@ -6,6 +6,16 @@
 
 #include "../include/send_utils.h"
 
+static inline std::string flat(std::string_view batch_dir, std::string_view filename) {
+    if (batch_dir.empty()) return std::string(filename);
+    std::string out;
+    out.reserve(batch_dir.size() + 1 + filename.size());
+    out.append(batch_dir.data(), batch_dir.size());
+    out.push_back('/');
+    out.append(filename.data(), filename.size());
+    return out;
+}
+
 FileBatch::FileBatch(std::size_t batch_size) : size(batch_size) {
     pending.reserve(size);
     id = 1;
@@ -124,7 +134,7 @@ bool FileBatch::compress(const std::string& out_path, std::string_view format) c
 }
 
 bool FileBatch::_compress_tar(const std::string& out_path, bool gzipped) const {
-    struct archive *a = archive_write_new();
+    struct archive* a = archive_write_new();
     if (!a) {
         fprintf(
             stderr, 
@@ -135,7 +145,7 @@ bool FileBatch::_compress_tar(const std::string& out_path, bool gzipped) const {
 
     archive_write_set_format_pax_restricted(a);
 
-    int r = gzipped ? archive_write_add_filter_gzip(a) : archive_write_add_filter_none(a);        
+    int r = gzipped ? archive_write_add_filter_gzip(a) : archive_write_add_filter_none(a);
     if (r != ARCHIVE_OK) {
         fprintf(
             stderr, 
@@ -157,24 +167,25 @@ bool FileBatch::_compress_tar(const std::string& out_path, bool gzipped) const {
 
     fs::path out(out_path);
     std::string batch_dir = out.stem().string();
-
     if (out.extension() == ".gz") batch_dir = out.stem().stem().string();
+
+    unsigned char buffer[1 << 16];
 
     for (const auto& file_path : pending) {
         fs::path p(file_path);
 
-        std::error_code ec;
-        auto sz = fs::file_size(p, ec);
-        if (ec) {
+        struct stat st{};
+        if (::stat(p.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
             fprintf(
-                stderr,
-                RED "[ERROR] Failed to get size for %s: %s\n" RESET, p.string().c_str(), ec.message().c_str()
+                stderr, 
+                RED "[ERROR] stat failed or not regular: %s (%s)\n" RESET,
+                p.string().c_str(), strerror(errno)
             );
             archive_write_free(a);
             return false;
         }
 
-        struct archive_entry *entry = archive_entry_new();
+        struct archive_entry* entry = archive_entry_new();
         if (!entry) {
             fprintf(
                 stderr, 
@@ -184,66 +195,65 @@ bool FileBatch::_compress_tar(const std::string& out_path, bool gzipped) const {
             return false;
         }
 
-        std::string name_in_tar = batch_dir.empty() ? p.filename().string() : (batch_dir + "/" + p.filename().string());
-
-        archive_entry_set_pathname(entry, name_in_tar.c_str());
-        archive_entry_set_size(entry, sz);
+        archive_entry_set_pathname(entry, flat(batch_dir, p.filename().string()).c_str());
+        archive_entry_set_size(entry, (la_int64_t)st.st_size);
         archive_entry_set_filetype(entry, AE_IFREG);
         archive_entry_set_perm(entry, 0644);
 
         r = archive_write_header(a, entry);
         if (r != ARCHIVE_OK) {
             fprintf(
-                stderr,
-                RED "[ERROR] Failed to write header for %s: %s\n" RESET, p.string().c_str(), archive_error_string(a)
+                stderr, 
+                RED "[ERROR] write header failed for %s: %s\n" RESET,
+                p.string().c_str(), archive_error_string(a)
             );
             archive_entry_free(entry);
             archive_write_free(a);
             return false;
         }
 
-        std::ifstream file(p, std::ios::binary);
-        if (!file.is_open()) {
+        int fd = ::open(p.c_str(), O_RDONLY | O_CLOEXEC);
+        if (fd < 0) {
             fprintf(
-                stderr,
-                RED "[ERROR] Failed to open file: %s\n" RESET, p.string().c_str()
+                stderr, 
+                RED "[ERROR] open failed: %s (%s)\n" RESET, 
+                p.string().c_str(), strerror(errno)
             );
             archive_entry_free(entry);
             archive_write_free(a);
             return false;
         }
 
-        char buffer[8192];
-        while (true) {
-            file.read(buffer, sizeof(buffer));
-            std::streamsize bytes_read = file.gcount();
-            if (bytes_read > 0) {
-                la_ssize_t written = archive_write_data(a, buffer, bytes_read);
-                if (written < 0 || static_cast<std::size_t>(written) != static_cast<std::size_t>(bytes_read)) {
-                    fprintf(
-                        stderr,
-                        RED "[ERROR] Failed to write data for %s: %s\n" RESET,
-                        p.string().c_str(), archive_error_string(a)
-                    );
-                    archive_entry_free(entry);
-                    archive_write_free(a);
-                    return false;
-                }
-            }
-
-            if (file.eof()) break;
-
-            if (file.bad()) {
+        for (;;) {
+            ssize_t n = ::read(fd, buffer, sizeof(buffer));
+            if (n < 0) {
                 fprintf(
-                    stderr,
-                    RED "[ERROR] Failed to read file: %s\n" RESET, p.string().c_str()
+                    stderr, 
+                    RED "[ERROR] read failed: %s (%s)\n" RESET, 
+                    p.string().c_str(), strerror(errno)
                 );
+                ::close(fd);
+                archive_entry_free(entry);
+                archive_write_free(a);
+                return false;
+            }
+            if (n == 0) break;
+
+            la_ssize_t written = archive_write_data(a, buffer, (size_t)n);
+            if (written < 0 || written != (la_ssize_t)n) {
+                fprintf(
+                    stderr, 
+                    RED "[ERROR] archive_write_data failed for %s: %s\n" RESET,
+                    p.string().c_str(), archive_error_string(a)
+                );
+                ::close(fd);
                 archive_entry_free(entry);
                 archive_write_free(a);
                 return false;
             }
         }
 
+        ::close(fd);
         archive_entry_free(entry);
     }
 
@@ -268,9 +278,15 @@ bool FileBatch::_compress_zip(const std::string& out_path) const {
         return false;
     }
 
+    fs::path out(out_path);
+    std::string batch_dir = out.stem().string();
+    if (out.extension() == ".gz") batch_dir = out.stem().stem().string();
+
     for (const auto& file_path : pending) {
-        std::ifstream file(file_path, std::ios::binary);
-        if (!file) {
+        fs::path p(file_path);
+
+        struct stat st{};
+        if (::stat(p.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
             fprintf(
                 stderr, 
                 RED "[ERROR] Failed to open file for zipping: %s\n" RESET, file_path.c_str()
@@ -289,7 +305,7 @@ bool FileBatch::_compress_zip(const std::string& out_path) const {
             return false;
         }
 
-        if (zip_file_add(zip, file_path.c_str(), source, ZIP_FL_OVERWRITE) < 0) {
+        if (zip_file_add(zip, flat(batch_dir, p.filename().string()).c_str(), source, ZIP_FL_OVERWRITE) < 0) {
             fprintf(
                 stderr, 
                 RED "[ERROR] Failed to add file to zip: %s\n" RESET, file_path.c_str()
