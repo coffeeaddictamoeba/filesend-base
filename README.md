@@ -247,13 +247,13 @@ Verifies file's SHA-256 (both raw and hex formats). Can be used on server side.
 openssl genrsa -out myCA.key 4096
 
 # CA self-signed certificate (root cert)
-openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 -out ca_cert.pem
+openssl req -x509 -new -nodes -key myCA.key -sha256 -days 3650 -out ca_cert.pem
 
 # Create a key
 openssl genrsa -out server.key 2048
 openssl req -new -key server.key -out server.csr
 
 # Sign
-openssl x509 -req -in server.csr -CA ca_cert.pem -CAkey ca.key \
+openssl x509 -req -in server.csr -CA ca_cert.pem -CAkey myCA.key \
    -CAcreateserial -out server.crt -days 365 -sha256
 ```
