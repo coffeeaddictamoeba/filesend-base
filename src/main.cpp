@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
     if (strcmp(cf.mode.c_str(), "send") == 0) {
         curl_global_init(CURL_GLOBAL_DEFAULT);
 
-        SentFileDatabase db(cf.init_path); db.load();
+        FileDatabase db(cf.init_path); db.load();
 
         std::unique_ptr<Sender> sender;
         std::unique_ptr<FileBatch> batch;
@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
             );
         }
 
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
         bool ok = s->send_files_from_path_mt(cf.init_path, cf.nthreads);
 #else
         bool ok = s->send_files_from_path(cf.init_path);

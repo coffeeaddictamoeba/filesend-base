@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <system_error>
 
+#include "build_features.h"
+
 // Colorful logs.
 #define RESET   "\033[0m"
 #define RED     "\033[31m"      // Errors

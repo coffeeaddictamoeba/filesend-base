@@ -7,9 +7,31 @@
 
 #include "defaults.h"
 
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
 #include "multithreading_utils.h"
 #endif
+
+struct NoDatabase {
+    static constexpr const char* db_path_ = "";
+
+    explicit NoDatabase(const std::string& db_path) { 
+        (void)db_path;
+        fprintf(
+            stderr, 
+            YELLOW "[WARN] The program was compiled without deduplication database support."
+            " To enable it, compile with -DFILESEND_PROFILE_FULL\n" RESET
+        );
+    };
+
+    bool load() { return true; };
+
+    bool claim(const std::string& path)  { (void)path; return true; };
+    bool commit(const std::string& path) { (void)path; return true; };
+    void rollback(const std::string& path) { (void)path; };
+    bool flush() { return true; };
+
+    const std::string& get_path() const { return db_path_; }
+};
 
 struct DatabaseEntry {
     std::string file_path;
@@ -69,15 +91,21 @@ private:
     std::unordered_map<std::string, std::size_t> idx_by_path_;
     bool dirty_ = false;
 
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     mutable std::mutex mu_;
 #endif
 };
 
-struct DbFlushGuard {
-    SentFileDatabase* db = nullptr;
+#if FILESEND_ENABLE_DB
+  using FileDatabase = SentFileDatabase;
+#else
+  using FileDatabase = NoDatabase;
+#endif
 
-    explicit DbFlushGuard(SentFileDatabase* p) : db(p) {}
+struct DbFlushGuard {
+    FileDatabase* db = nullptr;
+
+    explicit DbFlushGuard(FileDatabase* p) : db(p) {}
 
     ~DbFlushGuard() {
         if (!db) return;

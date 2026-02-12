@@ -137,6 +137,16 @@ void ArgParser::handle_send_encrypt(int& value, int argc, char** argv) {
 }
 
 void ArgParser::handle_send_batch(int& value, int argc, char** argv) {
+#if FILESEND_ENABLE_BATCH == 0
+    fprintf(
+        stderr, 
+        YELLOW "[WARN] Program was compiled without support for batch sending."
+        " To enable it, compile with \"-DFILESEND_PROFILE_FULL\"\n" RESET
+    );
+
+    // The remaining code is for args consuming
+#endif
+
     if (value + 1 >= argc) {
         std::fprintf(
             stderr,
@@ -175,7 +185,7 @@ void ArgParser::handle_mode_timeout(int& value, int argc, char** argv) {
 }
 
 void ArgParser::handle_mode_threads(int& value, int argc, char** argv) {
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     if (value + 1 >= argc) {
         fprintf(
             stderr,
@@ -188,8 +198,8 @@ void ArgParser::handle_mode_threads(int& value, int argc, char** argv) {
 #else
     fprintf(
         stderr, 
-        YELLOW "[WARN] Program was compiled without support for multithreading. "
-        "To enable it, compile with \"-DUSE_MULTITHREADING\"\n" RESET
+        YELLOW "[WARN] Program was compiled without support for multithreading."
+        " To enable it, compile with \"-DFILESEND_PROFILE_FULL\"\n" RESET
     );
 
     if (value + 1 < argc) (void)argv[++value]; // consume the next argument

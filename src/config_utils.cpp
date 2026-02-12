@@ -108,7 +108,7 @@ void GlobalFilesendConfig::set(std::string_view section, std::string_view key, s
 
     // SEND
     if (section == "send") {
-        if      (key == "use_ws")  { bool b; if (parse_bool(val,b)) cfg.use_ws = b ? true : false; }
+        if      (key == "use_ws")  { bool b; if (parse_bool(val,b)) cfg.use_ws = b; }
         else if (key == "url")     { cfg.policy.url.assign(val.data(), val.size()); }
         else if (key == "timeout") { int s; if (parse_int(val,s)) cfg.policy.timeout = std::chrono::seconds(std::max(0,s)); }
         else if (key == "retry")   { 
@@ -119,11 +119,38 @@ void GlobalFilesendConfig::set(std::string_view section, std::string_view key, s
                 std::max(1, std::abs(n)); 
             }
         }
-#ifdef USE_MULTITHREADING
-        else if (key == "nthreads") { int n; if (parse_int(val,n)) cfg.nthreads = std::max(1, n); }
+
+        else if (key == "nthreads") {
+#if FILESEND_ENABLE_MT
+            int n;
+            if (parse_int(val,n)) cfg.nthreads = std::max(1, n);
+#else
+            printf(
+                YELLOW "[WARN] The program was compiled without support for multithreading." 
+                " To enable it, compile with -DFILESEND_PROFILE_FULL\n" RESET
+            );
 #endif
-        else if (key == "batch_size") { int n; if (parse_int(val,n)) cfg.batch_size = (std::size_t)std::max(1,n); }
-        else if (key == "batch_format") cfg.batch_format.assign(val.data(), val.size());
+        }
+
+        else if (key == "batch_size") {
+#if FILESEND_ENABLE_BATCH
+            int n; 
+            if (parse_int(val,n)) cfg.batch_size = (std::size_t)std::max(1,n);
+        
+#else
+            printf(
+                YELLOW "[WARN] The program was compiled without support for batch sending." 
+                " To enable it, compile with -DFILESEND_PROFILE_FULL\n" RESET
+            );
+#endif
+        }
+
+        else if (key == "batch_format") {
+#if FILESEND_ENABLE_BATCH
+            cfg.batch_format.assign(val.data(), val.size());
+#endif
+        }
+
         return;
     }
 

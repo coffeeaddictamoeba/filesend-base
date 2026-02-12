@@ -26,7 +26,7 @@ struct FilesendConfig {
     std::string batch_format;
     std::size_t batch_size;
 
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     int nthreads;
 #endif
 

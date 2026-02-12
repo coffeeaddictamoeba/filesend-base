@@ -1,3 +1,6 @@
+#include "../include/build_features.h"
+
+#if FILESEND_ENABLE_BATCH
 #include <archive.h>
 #include <archive_entry.h>
 #include <cstdint>
@@ -16,17 +19,17 @@ static inline std::string flat(std::string_view batch_dir, std::string_view file
     return out;
 }
 
-FileBatch::FileBatch(std::size_t batch_size) : size(batch_size) {
+FilesArchiveBatch::FilesArchiveBatch(std::size_t batch_size) : size(batch_size) {
     pending.reserve(size);
     id = 1;
 }
 
-FileBatch::FileBatch(std::size_t batch_size, std::string& batch_format) : size(batch_size), format(batch_format) {
+FilesArchiveBatch::FilesArchiveBatch(std::size_t batch_size, std::string& batch_format) : size(batch_size), format(batch_format) {
     pending.reserve(size);
     id = 1;
 }
 
-void FileBatch::add(std::string_view file_path) {
+void FilesArchiveBatch::add(std::string_view file_path) {
     if (ready) return;
 
     pending.emplace_back(file_path);
@@ -35,7 +38,7 @@ void FileBatch::add(std::string_view file_path) {
     }
 }
 
-void FileBatch::remove(std::string_view file_path) {
+void FilesArchiveBatch::remove(std::string_view file_path) {
     if (pending.empty()) return;
 
     pending.erase(
@@ -47,12 +50,12 @@ void FileBatch::remove(std::string_view file_path) {
     );
 }
 
-void FileBatch::clear() {
+void FilesArchiveBatch::clear() {
     pending.clear();
     ready = false;
 }
 
-std::string FileBatch::get_name_timestamped() const {
+std::string FilesArchiveBatch::get_name_timestamped() const {
     std::time_t t = std::time(nullptr);
     std::tm tm{};
 
@@ -75,7 +78,7 @@ std::string FileBatch::get_name_timestamped() const {
     return std::string(out);
 }
 
-std::string FileBatch::get_name_timestamped(uint32_t tag) const {
+std::string FilesArchiveBatch::get_name_timestamped(uint32_t tag) const {
     std::time_t t = std::time(nullptr);
     std::tm tm{};
 
@@ -98,7 +101,7 @@ std::string FileBatch::get_name_timestamped(uint32_t tag) const {
     return std::string(out);
 }
 
-bool FileBatch::compress(const std::string& out_path, std::string_view format) const {
+bool FilesArchiveBatch::compress(const std::string& out_path, std::string_view format) const {
     if (pending.empty()) return false;
 
     fprintf(
@@ -133,7 +136,7 @@ bool FileBatch::compress(const std::string& out_path, std::string_view format) c
     }
 }
 
-bool FileBatch::_compress_tar(const std::string& out_path, bool gzipped) const {
+bool FilesArchiveBatch::_compress_tar(const std::string& out_path, bool gzipped) const {
     struct archive* a = archive_write_new();
     if (!a) {
         fprintf(
@@ -271,7 +274,7 @@ bool FileBatch::_compress_tar(const std::string& out_path, bool gzipped) const {
     return true;
 }
 
-bool FileBatch::_compress_zip(const std::string& out_path) const {
+bool FilesArchiveBatch::_compress_zip(const std::string& out_path) const {
     zip_t* zip = zip_open(out_path.c_str(), ZIP_CREATE | ZIP_EXCL, nullptr);
     if (!zip) {
         perror(RED "[ERROR] Failed to create zip archive" RESET);
@@ -326,3 +329,4 @@ bool FileBatch::_compress_zip(const std::string& out_path) const {
 
     return true;
 }
+#endif

@@ -21,7 +21,7 @@
 #include "db_utils.hpp"
 #include "sender_https.hpp"
 
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
 #include "../include/multithreading_utils.h"
 #endif
 
@@ -29,7 +29,7 @@ namespace fs = std::filesystem;
 
 struct TempDirsConfig {
     fs::path inbox;
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     const fs::path spool       = inbox / INBOX_SPOOL_DIR;
     const fs::path claimed_dir = spool / SPOOL_CLAIMED_DIR;
     const fs::path work_dir    = spool / SPOOL_WORK_DIR;
@@ -42,21 +42,21 @@ struct TempDirsConfig {
     explicit TempDirsConfig(const fs::path inbox_dir) : inbox(std::move(inbox_dir)) {};
 };
 
-class FileBatch {
+class FilesArchiveBatch {
 public:
     std::size_t size = 1;
     std::string format = DEFAULT_COMPRESSION_FORMAT;
 
     bool ready = false;
 
-    explicit FileBatch(std::size_t batch_size);
+    explicit FilesArchiveBatch(std::size_t batch_size);
 
-    explicit FileBatch(
+    explicit FilesArchiveBatch(
         std::size_t batch_size, 
         std::string& batch_format
     );
 
-    void operator=(const FileBatch& batch) {
+    void operator=(const FilesArchiveBatch& batch) {
         this->size    = batch.size;
         this->format  = batch.format;
         this->pending = batch.pending;
@@ -96,13 +96,52 @@ private:
     ) const;
 };
 
+#if FILESEND_ENABLE_BATCH
+  using FileBatch = FilesArchiveBatch;
+#else
+  struct FileBatch { // Dummy struct
+    std::string format = DEFAULT_COMPRESSION_FORMAT;
+    const size_t size = 1;
+    bool ready = false;
+
+    explicit FileBatch(std::size_t batch_size) { (void)batch_size; };
+
+    explicit FileBatch(std::size_t batch_size, std::string& batch_format) {
+        (void)batch_size;
+        (void)batch_format;
+    };
+
+    void operator=(const FileBatch& batch) { (void)batch; }
+
+    constexpr void add(std::string_view file_path) { (void)file_path; }
+
+    constexpr size_t qsize() const { return 0; }
+    constexpr int get_id()   const { return 0; }
+    constexpr int increment_id()   { return 0; }
+    constexpr void clear() {};
+
+    constexpr bool compress(
+        const std::string& out_path, 
+        std::string_view format
+    ) const { return true; };
+
+    std::vector<std::string> get_pending_filenames() const {
+        std::vector<std::string> temp; 
+        return temp; 
+    }
+
+    constexpr char* get_name_timestamped() const { return nullptr; };
+    constexpr char* get_name_timestamped(uint32_t tag) const { (void)tag; return nullptr; };
+  };
+#endif
+
 class FileSender {
 public:
-    FileSender(Sender& s, SentFileDatabase* db = nullptr) : sender_(s), db_(db) {
+    FileSender(Sender& s, FileDatabase* db = nullptr) : sender_(s), db_(db) {
         batch_ = nullptr; 
     }
 
-    FileSender(Sender& s, FileBatch* batch, SentFileDatabase* db = nullptr) : sender_(s), db_(db), batch_(batch) {}
+    FileSender(Sender& s, FileBatch* batch, FileDatabase* db = nullptr) : sender_(s), db_(db), batch_(batch) {}
 
     bool send_one_file(const fs::path& p);
 
@@ -113,7 +152,7 @@ public:
 
     bool send_files_from_path(const fs::path& path);
 
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     bool send_files_from_path_mt(const fs::path& p, int nthreads);
 
     bool send_files_from_path_mt(
@@ -125,7 +164,7 @@ public:
 
 private:
     Sender& sender_;
-    SentFileDatabase* db_;
+    FileDatabase* db_;
     FileBatch* batch_;
 
     bool process_one_file(

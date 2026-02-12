@@ -1,3 +1,6 @@
+#include "../include/build_features.h"
+
+#if FILESEND_ENABLE_DB
 #include <cstdint>
 #include <fstream>
 #include <istream>
@@ -11,7 +14,7 @@
 #include <cstdio>
 #include <cerrno>
 
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
 #include "../include/multithreading_utils.h"
 #endif
 
@@ -72,7 +75,7 @@ bool SentFileDatabase::deserialize(std::istream& in, DatabaseEntry& e) {
 }
 
 bool SentFileDatabase::load() {
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     std::lock_guard<std::mutex> lk(mu_);
 #endif
     entries_.clear();
@@ -131,7 +134,7 @@ bool SentFileDatabase::ensure_up_to_date_(DatabaseEntry& e, uint64_t mtime, uint
 bool SentFileDatabase::claim(const std::string& path) {
     if (path == get_path()) return false;
 
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     std::lock_guard<std::mutex> lk(mu_);
 #endif
 
@@ -153,7 +156,7 @@ bool SentFileDatabase::claim(const std::string& path) {
 }
 
 bool SentFileDatabase::commit(const std::string& path) {
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     std::lock_guard<std::mutex> lk(mu_);
 #endif
     DatabaseEntry& e = get_or_create_(path);
@@ -171,7 +174,7 @@ bool SentFileDatabase::commit(const std::string& path) {
 }
 
 void SentFileDatabase::rollback(const std::string& path) {
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     std::lock_guard<std::mutex> lk(mu_);
 #endif
     auto it = idx_by_path_.find(path);
@@ -185,7 +188,7 @@ void SentFileDatabase::rollback(const std::string& path) {
 }
 
 bool SentFileDatabase::flush() {
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     std::lock_guard<std::mutex> lk(mu_);
 #endif
     if (!dirty_) return true;
@@ -216,3 +219,4 @@ bool SentFileDatabase::flush() {
     dirty_ = false;
     return true;
 }
+#endif

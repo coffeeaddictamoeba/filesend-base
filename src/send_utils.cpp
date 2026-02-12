@@ -34,10 +34,10 @@ static inline bool rename_successful(const fs::path& a, const fs::path& b) {
 }
 
 static void init_workdirs(int nthreads, const TempDirsConfig& dc, std::vector<fs::path>* workdirs) {
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
     if (nthreads > 0) {
         assert(nthreads <= MAX_WORKERS_MT);
-
+ 
         fs::create_directories(dc.claimed_dir);
         fs::create_directories(dc.work_dir);
         fs::create_directories(dc.failed_dir);
@@ -49,6 +49,9 @@ static void init_workdirs(int nthreads, const TempDirsConfig& dc, std::vector<fs
             workdirs->push_back(d);
         }
     }
+#else
+    (void)nthreads;
+    (void)workdirs;
 #endif
 
     // Essentials (both st and mt)
@@ -76,6 +79,8 @@ bool FileSender::send_one_file(const fs::path& p) {
 
 // Encrypts a single file from dir (no DB interaction)
 bool FileSender::process_one_file(const fs::path& in, fs::path& out, const FilesendPolicy& policy, const TempDirsConfig& dc, std::unordered_set<std::string>* processed) {
+    (void)processed;
+    
     fprintf(
         stdout,
         "[INFO] Processing file: %s (encryption policy: %d)\n", in.c_str(), policy.enc_p.flags
@@ -126,7 +131,12 @@ bool FileSender::process_and_send_one_file(const fs::path& in, const FilesendPol
             db_->commit(in_str);
         }
 
-        if (policy.is_encryption_with_archive()) rename_successful(out, dc.archive / out.filename());
+        if (policy.is_encryption_with_archive()) {
+            rename_successful(out, dc.archive / out.filename());
+        } else {
+            printf("[INFO] No archiving policy specified. Removing encryption artifact: %s\n", out.c_str());
+            //fs::remove(out);
+        }
 
         return true;
     }
@@ -139,6 +149,7 @@ bool FileSender::process_and_send_one_file(const fs::path& in, const FilesendPol
 // Fill the batch file queue, then compress (no DB interaction)
 bool FileSender::process_one_batch(FileBatch& b, const fs::path& in, fs::path& archive, const FilesendPolicy& policy, const TempDirsConfig& dc, std::unordered_set<std::string>* processed, uint32_t tag = 0) {
     (void)policy;
+    (void)processed;
 
     // ready check *before* addition
     if (!b.ready) b.add(in.string());
@@ -314,10 +325,12 @@ bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::second
                     printf(YELLOW "[INFO] Timeout reached: No new events for %lld seconds, stopping.\n" RESET, (long long)timeout.count());
                 }
 
+#if FILESEND_ENABLE_DB
                 if (db_) {
                     db_->flush(); // save all 
                     sender_.send_file(db_->get_path());
                 }
+#endif
 
                 sender_.send_end();
                 return true;
@@ -331,7 +344,7 @@ bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::second
     return true;
 }
 
-#ifdef USE_MULTITHREADING
+#if FILESEND_ENABLE_MT
 bool FileSender::send_files_from_path_mt(const fs::path& p, int nthreads = MAX_WORKERS_MT) {
     return send_files_from_path_mt(p, sender_.get_policy().timeout, nthreads);
 }
@@ -383,7 +396,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                 if (policy.is_encryption_with_archive()) {
                     rename_successful(enc, dc.archive / enc.filename());
                 } else {
-                    printf("[INFO] No archiving specified. Removing encryption artifact: %s\n", enc.c_str());
+                    printf("[INFO] No archiving policy specified. Removing encryption artifact: %s\n", enc.c_str());
                     fs::remove(enc);
                 }
             }
@@ -665,10 +678,12 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
     qs.stop();
     sender_thr.join();
 
+#if FILESEND_ENABLE_DB
     if (db_) {
         db_->flush();
         sender_.send_file(db_->get_path());
     }
+#endif
 
     sender_.send_end();
     return !had_error.load();
