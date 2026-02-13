@@ -120,10 +120,11 @@ private:
     constexpr int increment_id()   { return 0; }
     constexpr void clear() {};
 
-    constexpr bool compress(
-        const std::string& out_path, 
-        std::string_view format
-    ) const { return true; };
+    constexpr bool compress(const std::string& out_path, std::string_view format) const {
+        (void)out_path;
+        (void)format;
+        return true;
+    };
 
     std::vector<std::string> get_pending_filenames() const {
         std::vector<std::string> temp; 

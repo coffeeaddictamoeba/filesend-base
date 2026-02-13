@@ -266,8 +266,6 @@ public:
 
             if (!force && sv_ends_with(src_name, ENC)) return true;
 
-            bool same_path = false;
-
             if (plan.mode == DestPathMode::DEST_FILE) {
                 dst.assign(plan.dest);
 
@@ -278,7 +276,6 @@ public:
                 if (src_full == dst) {
                     append_suffix(out_name, src_name_c, ENC);
                     join2(dst, src_dir, out_name);
-                    same_path = false;
                 }
 
             } else {

@@ -1,5 +1,5 @@
 CXX       := g++
-CXXFLAGS  := -std=c++17 -Wall -Wextra -O2 -Iinclude -DFILESEND_PROFILE_TEST
+CXXFLAGS  := -std=c++17 -Wall -Wextra -O2 -Iinclude -DFILESEND_PROFILE_FULL
 CFLAGS    := -Wall -Wextra -O2 -Iinclude
 LDFLAGS   := -lsodium -lcurl -lssl -lcrypto -lpthread -lzip -larchive
 

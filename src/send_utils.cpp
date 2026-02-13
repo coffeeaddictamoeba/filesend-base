@@ -135,7 +135,7 @@ bool FileSender::process_and_send_one_file(const fs::path& in, const FilesendPol
             rename_successful(out, dc.archive / out.filename());
         } else {
             printf("[INFO] No archiving policy specified. Removing encryption artifact: %s\n", out.c_str());
-            //fs::remove(out);
+            fs::remove(out);
         }
 
         return true;
@@ -305,7 +305,7 @@ bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::second
                 // Batch
                 if (batch_ && batch_->qsize() > 0) {
                     printf(
-                        "[INFO] Timeout reached (%lld seconds), sending last batch: %d (queue size: %zu/%zu).\n", 
+                        YELLOW "[INFO] Timeout reached (%lld seconds), sending last batch: %d (queue size: %zu/%zu).\n" RESET, 
                         (long long)timeout.count(), batch_->get_id(), batch_->qsize(), batch_->size
                     );
 
@@ -330,7 +330,7 @@ bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::second
                     db_->flush(); // save all 
                     sender_.send_file(db_->get_path());
                 }
-#endif
+#endif // FILESEND_ENABLE_DB
 
                 sender_.send_end();
                 return true;
@@ -630,8 +630,8 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                 return;
             }
 
-            const fs::path claimed = dc.claimed_dir / name
-            ;
+            const fs::path claimed = dc.claimed_dir / name;
+
             if (!rename_successful(ready_file, claimed)) {
                 if (db_) db_->rollback(f);
                 return;
@@ -678,14 +678,14 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
     qs.stop();
     sender_thr.join();
 
-#if FILESEND_ENABLE_DB
+  #if FILESEND_ENABLE_DB
     if (db_) {
         db_->flush();
         sender_.send_file(db_->get_path());
     }
-#endif
+  #endif // FILESEND_ENABLE_DB
 
     sender_.send_end();
     return !had_error.load();
 }
-#endif
+#endif // FILESEND_ENABLE_MT

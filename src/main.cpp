@@ -35,7 +35,9 @@ int main(int argc, char** argv) {
 
     // SEND MODE
     if (strcmp(cf.mode.c_str(), "send") == 0) {
+#if FILESEND_ENABLE_HTTP
         curl_global_init(CURL_GLOBAL_DEFAULT);
+#endif
 
         FileDatabase db(cf.init_path); db.load();
 
@@ -43,17 +45,37 @@ int main(int argc, char** argv) {
         std::unique_ptr<FileBatch> batch;
 
         if (cf.use_ws) {
+#if FILESEND_ENABLE_WS
             // WS transport
             sender = std::make_unique<WsSender>(
                 cf.device_id,
                 cf.policy
             );
+#else
+            fprintf(
+                stderr, 
+                RED "[ERROR] The program was compiled without support for sending over WS."
+                " To enable it, compile with -DFILESEND_PROFILE_FULL or try sending over HTTP (if enabled)\n" RESET
+            );
+
+            return EXIT_FAILURE;
+#endif
         } else {
+#if FILESEND_ENABLE_HTTP
             // HTTPS transport
             sender = std::make_unique<HttpsSender>(
                 cf.device_id,
                 cf.policy
             );
+#else
+            fprintf(
+                stderr, 
+                RED "[ERROR] The program was compiled without support for sending over HTTP."
+                " To enable it, compile with -DFILESEND_PROFILE_FULL or try sending over WebSocket (if enabled)\n" RESET
+            );
+
+            return EXIT_FAILURE;
+#endif
         }
 
         std::unique_ptr<FileSender> s;
@@ -78,7 +100,9 @@ int main(int argc, char** argv) {
 #endif
         sender->send_end();
 
+#if FILESEND_ENABLE_HTTP
         curl_global_cleanup();
+#endif
 
         return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 
