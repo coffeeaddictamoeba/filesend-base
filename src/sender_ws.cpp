@@ -2,6 +2,7 @@
 
 #include "../include/sender_ws.hpp"
 
+#if FILESEND_ENABLE_WS
 WsSender::WsSender(const std::string& device_id, FilesendPolicy& policy)
     : Sender(policy),
       device_id_(device_id),
@@ -63,3 +64,4 @@ bool WsSender::send_end() {
         [&]() { return _send_end(); }
     );
 }
+#endif // FILESEND_ENABLE_WS

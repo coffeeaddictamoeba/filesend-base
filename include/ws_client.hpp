@@ -1,5 +1,6 @@
 #pragma once
 
+#if FILESEND_ENABLE_WS
 #include <string>
 #include <memory>
 #include <boost/asio.hpp>
@@ -57,3 +58,4 @@ private:
     websocket::stream<tcp::socket>* ws_plain() { return ws_plain_.get(); }
     websocket::stream<ssl::stream<tcp::socket>>* ws_tls() { return ws_tls_.get(); }
 };
+#endif // FILESEND_ENABLE_WS

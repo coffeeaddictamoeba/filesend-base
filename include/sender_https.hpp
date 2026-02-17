@@ -1,10 +1,11 @@
 #pragma once
 
+#include "sender.hpp"
+
+#if FILESEND_ENABLE_HTTP
 #include <curl/curl.h>
 #include <string>
 #include <memory>
-
-#include "sender.hpp"
 
 class HttpsSender : public Sender {
 public:
@@ -27,3 +28,4 @@ private:
     bool _send_file(const std::string& file_path);
     bool _send_end();
 };
+#endif // FILESEND_ENABLE_HTTP

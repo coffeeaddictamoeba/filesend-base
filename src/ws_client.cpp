@@ -1,11 +1,12 @@
+#include "../include/defaults.h"
+#include "../include/ws_client.hpp"
+#include "../include/file_utils.h"
+
+#if FILESEND_ENABLE_WS
 #include <fstream>
 #include <cstdio>
 #include <sodium/crypto_hash_sha256.h>
 #include <string>
-
-#include "../include/defaults.h"
-#include "../include/ws_client.hpp"
-#include "../include/file_utils.h"
 
 WsClient::WsClient(const std::string& url, const std::string& device_id, const std::string& ca_cert)
     : url_(url),
@@ -257,3 +258,4 @@ int WsClient::send_end() {
         return -1;
     }
 }
+#endif // FILESEND_ENABLE_WS

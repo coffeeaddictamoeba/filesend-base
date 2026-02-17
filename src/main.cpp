@@ -10,7 +10,10 @@
 #include <memory>
 
 #include <sodium.h>
+
+#if FILESEND_ENABLE_HTTP
 #include <curl/curl.h>
+#endif
 
 #include "../include/arg_utils.h"
 #include "../include/sender_https.hpp"

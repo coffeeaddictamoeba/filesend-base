@@ -8,7 +8,10 @@
 #include <memory>
 #include <cstdio>
 
+#if FILESEND_ENABLE_HTTP
 #include <curl/curl.h>
+#endif
+
 #include <thread>
 
 extern "C" {

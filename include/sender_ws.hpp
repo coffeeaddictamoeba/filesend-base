@@ -3,6 +3,7 @@
 #include "sender.hpp"
 #include "ws_client.hpp"
 
+#if FILESEND_ENABLE_WS
 class WsSender : public Sender {
 public:
     WsSender(
@@ -26,3 +27,4 @@ private:
     bool _send_file(const std::string& file_path);
     bool _send_end();
 };
+#endif // FILESEND_ENABLE_WS

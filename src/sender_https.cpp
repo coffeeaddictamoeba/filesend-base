@@ -1,8 +1,9 @@
+#include "../include/sender_https.hpp"
+
+#if FILESEND_ENABLE_HTTP
 #include <curl/curl.h>
 #include <stdexcept>
 #include <thread>
-
-#include "../include/sender_https.hpp"
 
 HttpsSender::HttpsSender(const std::string& device_id, FilesendPolicy& policy) : Sender(policy), device_id_(device_id), policy_(policy) {
     curl_ = curl_easy_init();
@@ -164,3 +165,4 @@ bool HttpsSender::send_end() {
         [&]() { return _send_end(); }
     );
 }
+#endif // FILESEND_ENABLE_HTTP
