@@ -1,7 +1,10 @@
 CXX       := g++
 CXXFLAGS  := -std=c++17 -Wall -Wextra -O2 -Iinclude -DFILESEND_PROFILE_FULL
-CFLAGS    := -Wall -Wextra -O2 -Iinclude
-LDFLAGS   := -lsodium -lcurl -lssl -lcrypto -lpthread -lzip -larchive
+
+LDFLAGS_REQ := -lsodium -lssl -lcrypto # flags required for all profiles (FULL, CUSTOM, MINIMAL)
+LDFLAGS_OPT := -lcurl -lpthread -lzip -larchive # optional flags, comment for MINIMAL
+
+LDFLAGS := $(LDFLAGS_REQ) $(LDFLAGS_OPT)
 
 SRC_DIR   := src
 OBJ_DIR   := obj
