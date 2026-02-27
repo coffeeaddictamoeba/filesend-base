@@ -11,6 +11,21 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 - Archive option is added for sending, encryption and decryption
 - File encryption format standardized
 - Server-side logging is added
+- **Compile-time options are added**
+
+### Compile-Time Options
+
+---
+
+By default all of the application features are enabled, but if you want to have more control over dependencies, there are three possible options for you to choose from:
+
+| Option                       | Encryption/Decryption | WS/WSS | HTTP/HTTPS | Database | Batching | Multithreading |
+| ---------------------------- | --------------------- | ------ | ---------- | -------- | -------- | -------------- |
+| `FILESEND_PROFILE_FULL`    | +                     | +      | +          | +        | +        | +              |
+| `FILESEND_PROFILE_MINIMAL` | +                     | +      | -          | -        | -        | -              |
+| `FILESEND_PROFILE_CUSTOM`  | +                     | ?      | ?          | ?        | ?        | ?              |
+
+`FILESEND_PROFILE_CUSTOM` allows you to specify only the features you prefer, but to do so you need to set up the necessary features inside `include/build_features.h`. 
 
 ### General Syntax
 
@@ -103,9 +118,11 @@ filesend send [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--al
 * **`--no-retry`** – set number of retries to 0
 * **`--batch <n>`** – group `n` files to a compressed batch and send the batch. All policies specified are applied to the **batch** itself, **not the files** inside (i.e. if you use `--encrypt`, only the batch file will be encrypted)
 * **`--archive`** – save sent files instead of removing them
-* **`--nthreads`** – if compiled with `USE_MULTITHREADING` option, set number of threads to `n`. If running in multithreading mode and this option is not specified, number of threads used is equal to `MAX_WORKERS_MT`.
+* **`--nthreads`** – if compiled with `USE_MULTITHREADING` option, set number of threads to `n`. If running in multithreading mode and this option is not specified, number of threads used is equal to `MAX_WORKERS_MT`. NOTE: `MAX_WORKER_MT` needs to be properly adjusted for the device on which you plan to run this code. Right now `MAX_WORKER_MT = 4`, but if you wish to have more threads, change the number manually in `include/multithreading_utils.h`.
 
 **Environment variables**
+
+The environment variables are used for server to decrypt the encrypted file (as it uses `filesend` CLI) and in CLI mode for `filesend`. If you run `filesend` with the config, `.env` is ignored.
 
 `CERT_PATH` – path to CA certificate used to validate server TLS certificate (both HTTPS and WS)
 
@@ -233,7 +250,6 @@ Verifies file's SHA-256 (both raw and hex formats). Can be used on server side.
 * `--all` enables encryption/decryption of **metadata** (mtime, mode, uid/gid).
 * URL  **must include `/upload`** , as the server expects this endpoint.
 * The hostname in the URL must match the certificate CN/SAN (e.g., `Test`, `localhost`).
-* CA certificate for TLS validation must be given via `CERT_PATH`.
 * Server *private key* **must never** be on the sending device – only the server should have it.
 * Asymmetric encryption is recommended for device - server communication (one-way encryption).
 * Symmetric encryption is recommended for local file storage or local pipelines.
