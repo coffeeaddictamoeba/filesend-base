@@ -1,10 +1,24 @@
-CXX       := g++
-CXXFLAGS  := -std=c++17 -Wall -Wextra -O2 -Iinclude -DFILESEND_PROFILE_FULL
+CXX := g++
 
-LDFLAGS_REQ := -lsodium -lssl -lcrypto # flags required for all profiles (FULL, CUSTOM, MINIMAL)
-LDFLAGS_OPT := -lcurl -lpthread -lzip -larchive # optional flags, comment for MINIMAL
+PROFILE ?= FULL
 
-LDFLAGS := $(LDFLAGS_REQ) $(LDFLAGS_OPT)
+COMMON_CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -Iinclude
+COMMON_LDFLAGS_REQ := -lsodium -lssl -lcrypto
+
+ifeq ($(PROFILE),MINIMAL)
+  PROFILE_DEFINE := -DFILESEND_PROFILE_MINIMAL
+  LDFLAGS := $(COMMON_LDFLAGS_REQ)
+else ifeq ($(PROFILE),FULL)
+  PROFILE_DEFINE := -DFILESEND_PROFILE_FULL
+  LDFLAGS := $(COMMON_LDFLAGS_REQ) -lcurl -lpthread -lzip -larchive
+else ifeq ($(PROFILE),CUSTOM)
+  PROFILE_DEFINE := -DFILESEND_PROFILE_CUSTOM
+  LDFLAGS := $(COMMON_LDFLAGS_REQ) -lcurl -lpthread -lzip -larchive # choose the ones you selected. For HTTP support you need -lcurl; MT - -lpthread; batching - -lzip -larchive
+else
+  $(error Unsupported PROFILE='$(PROFILE)'. Use PROFILE=FULL, PROFILE=CUSTOM or PROFILE=MINIMAL)
+endif
+
+CXXFLAGS := $(COMMON_CXXFLAGS) $(PROFILE_DEFINE)
 
 SRC_DIR   := src
 OBJ_DIR   := obj
@@ -34,4 +48,9 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
 clean:
 	rm -rf $(OBJ_DIR) $(BUILD_DIR)
 
-.PHONY: all clean
+print-config:
+	@echo "PROFILE=$(PROFILE)"
+	@echo "CXXFLAGS=$(CXXFLAGS)"
+	@echo "LDFLAGS=$(LDFLAGS)"
+
+.PHONY: all clean print-config

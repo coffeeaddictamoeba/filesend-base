@@ -44,3 +44,9 @@ test/
 bin/
 lib/
 obj/
+
+examples/security
+examples/keys
+examples/certs
+examples/.venv
+examples/logs
