@@ -25,7 +25,106 @@ By default all of the application features are enabled, but if you want to have 
 | `FILESEND_PROFILE_MINIMAL` | +                     | +      | -          | -        | -        | -              |
 | `FILESEND_PROFILE_CUSTOM`  | +                     | ?      | ?          | ?        | ?        | ?              |
 
-`FILESEND_PROFILE_CUSTOM` allows you to specify only the features you prefer, but to do so you need to set up the necessary features inside `include/build_features.h`. 
+`FILESEND_PROFILE_CUSTOM` allows you to specify only the features you prefer, but to do so you need to set up the necessary features inside `include/build_features.h`.
+
+### Sending Directory Layout
+
+---
+
+Assume your initial directory for incoming images is `mydir/`
+
+* When running the program in sending mode, it creates a directory tree under the initial directory `mydir/`. This is optional for single-threaded sending but crucial for multithreaded version.
+* `mydir/.filesend_archive` - an archive that stores all processed files during the sending. Needs flag `archive` to be set in config or by CLI.
+* `mydir/.filesend_outbox` - last directory before a file that is sent to a server. If a file gets there, its preprocessing was successful.
+* `mydir/.filesend_tmp` - a directory for temporary file processing steps.
+* `mydir/.filesend_spool` - a directory that targets clean multiprocessing pipeline, creating 4 subdirectories:
+  * `claimed` - files that the program started to process but didn't assigned to any thread yet;
+  * `failed` - files that were processed unsuccessfully for some reason;
+  * `outtmp` - directory for temporary file processing;
+  * `work` - directory for threads to divide the work on files.
+* `mydir/.filesend_cache` - if the database is enabled, this file stores data about sent files to ignore processing a file twice.
+
+### Building Project
+
+---
+
+#### Building `filesend-app`
+
+With Docker:
+
+```bash
+# Build (from the repo root, filesend-base/)
+docker build -t filesend-app . 
+
+# Run
+docker run --rm -it \
+   --name filesend-dev \
+   --user "$(id -u):$(id -g)" \
+   --network=host \
+   -v "$(pwd):/workspace" \
+   -w /workspace \
+   filesend-app
+
+# Then, in filesend-app container
+make
+
+# If planning to run and use CLI, run:
+source .env # with security material data; update if needed
+```
+
+List of dependencies used:
+
+- libsodium (cryptography; necessary)
+- libssl (secure connection; necessary)
+- libcurl (HTTP/HTTPS connection; optional)
+- libboost for boost.beast and boost.asio headers (WebSocket connection; necessary, but can be optional if HTTP connection dependency is present)
+- libzip & libarchive (batch archives in `zip`, `tar` and `tar.gz` formats)
+
+#### Building `filesend-server`
+
+Dockerfile for the server can be found in `examples/` directory, where examples of server code and configs are.
+
+With Docker:
+
+```bash
+# Build (run from filesend-base/ repo root, NOT from examples/):
+docker build \
+   -f examples/Dockerfile
+   --build-arg USER_UID="$(id -u)" \
+   --build-arg USER_GID="$(id -g)" \
+   -t filesend-server-dev .
+
+cd examples/ # change directory so we don't copy unnecessary files once again
+
+# Run (from examples/)
+docker run --rm -it \
+   -v "$PWD:/workspace" \
+   -e SERVER_MODE=ws \  # default mode is WebSocket (WS); for HTTP additional configuraton is needed
+   filesend-server-dev
+
+# Running filesend-server-dev for the first time will generate the security material, such as symmetric/asymmetric keys, server certificate and server keys
+# To interact with the server, sender that runs filesend-base app needs to have security material from these locations:
+#    - examples/certs/ca-cert-YYYY-MM-DD.pem
+#    - examples/keys/pub_key-YYYY-MM-DD.bin (if asymmetric; do NOT copy the private key to sender)
+#    - examples/keys/sym_key-YYYY-MM-DD.bin (if symmetric)
+# Everything else is for server's security
+
+# NOTE: filesend app generates its own keys (symmetric and asymmetric) and keys generated elsewhere are NOT suitable for encryption/decryption. Running the commands above already creates all the necessary keys, but it is important to mention it. To create a pair of keys run:
+touch mytemp.txt && echo "a line of text" > mytemp.txt # create a temporary file
+unset PUB_KEY_PATH || true
+unset PR_KEY_PATH || true
+unset SYM_KEY_PATH || true
+bin/./filesend encrypt mytemp.txt --symmetric|--asymmetric # try to encrypt the file without .env sourced
+
+# NOTE: Server's config will update security info (key and certificate locations) automatically, while receiver's config will NOT: you need to enter these locations manually.
+
+# Inside the filesend-server-dev container:
+source .venv/bin/activate
+set -a && source .env && set +a
+python runserver_ws.py  # OR python runserver_https.py (if available)
+
+```
+
 
 ### General Syntax
 
@@ -55,40 +154,90 @@ filesend send my_files/
 filesend <mode> <path> --arg  # will use CLI instead of config
 ```
 
-Example of config file structure (same for sender and server):
+Example of **app** config file structure (sender):
 
 ```
 [global]
-device_id = some_device_id_here
-cert_path = cert.pem
-security_info = true # will be added soon
+device_id = some_device_id_here          # unique identifier of a sender device
+cert_path = cert.pem                     # certificate for server connection; place for ca-cert-YYYY-MM-DD.pem
+security_info = true                     # will be added soon
 use_config = true
 
 [send]
 # http/https
-# url = https://test:8443/upload
-# use_ws = false
+# url = https://test:8443/upload         # HTTP/HTTPS URL; must end with /upload
+# use_ws = false                         # flag for websocket use; for HTTP/HTTPS is false
 
 # websocket
-url = wss://0.0.0.0:8444
-use_ws = true
+url = wss://0.0.0.0:8444                 # WS/WSS URL
+use_ws = true                            # flag for websocket use; for HTTP/HTTPS is false
 
-timeout = 5
-retry = 3
-nthreads = 3
-batch_size = 1
-batch_format = zip
+timeout = 5                              # if there are no more new files in directory, the app will stop; measured in seconds
+retry = 3                                # amount of retries in case of unsuccessful connection; does NOT retry failed file processing
+nthreads = 3                             # number of sending threads
+batch_size = 1                           # amount of files inside a batch archive; if set to 1, no batching is applied
+batch_format = zip                       # format of batch archive; can be .zip, .tar or .tar.gz
 
 [crypto]
-mode = asymmetric
-all     = true
-archive = false
-force   = false
-pub_key_path = pub.key
-pr_key_path  = pr.key
-# sym_key_path = sym.key   # do not use both key modes simultaneously
+mode = asymmetric                        # key cryptosystem; can be symmetric (one key) or asymmetric (private and public keys)
+all     = true                           # if set to true, includes file metadata when encrypting/decrypting file contents;
+archive = false                          # if set to true, saves the files after sending and removes otherwise
+force   = false                          # ignores rules for application of encryption/decryption; can encrypt file twice or decrypt file without .enc extension
+pub_key_path = pub.key                   # public key
+pr_key_path  = pr.key                    # private key (should NOT be stored on sender if no file decryption is planned)
+# sym_key_path = sym.key                 # symmetric key; do NOT use both key modes simultaneously
 
-dest_path = my_dest/
+dest_path = my_dest/                     # destiation of processed files
+```
+
+
+
+Example of **server** config file structure:
+
+```
+# Example of server config
+
+[global]
+security_info = true              # will be added soon
+use_config = true
+
+[server]
+host = 0.0.0.0                    # host information
+port = 8444                       # port information
+
+[paths]
+incoming_dir  = incoming          # directory that accepts incoming files
+decrypted_dir = decrypted         # directory that stores decrypted incoming files
+
+[limits]
+max_file_mb     = 32
+max_json_kb     = 16
+idle_timeout_s  = 30
+ping_interval_s = 20
+ping_timeout_s  = 20
+
+[auth]
+require_auth = false              # authenticate by device id
+token_file   = devtokens.json     # file that stores information about all allowed devices
+
+[dedup]
+enable = true                     # enable file deduplication (if same file comes twice, it is ignored)
+db_path = received_files.sqlite3  # received files database path
+
+[tls]
+# If cert/key are empty or absent => runs with no TLS
+cert_path = certs/server.crt      # server certificate
+key_path  = keys/server.key       # server key
+
+[filesend]
+bin_path = bin/filesend           # binary with filesend (server needs it for decryption)
+decrypt_timeout_s = 60
+
+[logging]
+level = INFO                      # log level
+# If empty => terminal-only
+file  = logs/server.log           # log file path
+
 ```
 
 #### Mode: `send`
