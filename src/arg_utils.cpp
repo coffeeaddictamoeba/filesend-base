@@ -18,6 +18,7 @@ ArgParser::ArgParser() {
         {"encrypt", [this](int argc, char** argv) { handle_security_settings(argc, argv); }},
         {"decrypt", [this](int argc, char** argv) { handle_security_settings(argc, argv); }},
         {"verify",  [this](int argc, char** argv) { handle_verify(argc, argv); }},
+        {"keygen",  [this](int argc, char** argv) { handle_keygen(argc, argv); }}, // add --dest option
     };
 }
 
@@ -82,10 +83,14 @@ int ArgParser::parse(int argc, char** argv) {
 
     if (argc > 3) init_config_cli();
     else {
-        init_config_ini();
-        config_.mode = argv[1];
-        config_.init_path = argv[2];
-        return 0;
+        if (strcmp(argv[1], "keygen") == 0) { // config_.mode = argv[1];
+            init_config_cli();
+        } else { // config-based
+            init_config_ini();
+            config_.mode = argv[1];
+            config_.init_path = argv[2];
+            return 0;
+        }
     }
     
     config_.mode = argv[1];
@@ -134,6 +139,39 @@ void ArgParser::handle_send_encrypt(int& value, int argc, char** argv) {
         );
         return;
     }
+}
+
+void ArgParser::handle_keygen(int argc, char** argv) {
+    if (argc < 3) {
+        fprintf(
+            stderr,
+            RED "[ERROR] keygen requires '--symmetric' or '--asymmetric'\n" RESET
+        );
+        return;
+    }
+
+    const char* keygen_mode = argv[2];
+    if (strcmp(keygen_mode, "--symmetric") == 0) {
+        config_.policy.enc_p.flags |= ENC_FLAG_SYMMETRIC;
+    } else if (strcmp(keygen_mode, "--asymmetric") == 0) {
+        config_.policy.enc_p.flags &= ~ENC_FLAG_SYMMETRIC;
+    } else {
+        fprintf(
+            stderr,
+            RED "[ERROR] keygen: unknown key generation mode.\n" RESET
+        );
+        return;
+    }
+
+    config_.policy.is_encryption_symmetric() 
+        ? config_.policy.enc_p.key_path = getenv_or_default(
+            SYM_KEY_ENV, 
+            DEFAULT_SYM_KEY_PATH
+        )
+        : config_.policy.enc_p.key_path = getenv_or_default(
+            PUB_KEY_ENV, 
+            DEFAULT_PUB_KEY_PATH
+        );
 }
 
 void ArgParser::handle_send_batch(int& value, int argc, char** argv) {

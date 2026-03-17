@@ -5,17 +5,20 @@ PROFILE ?= FULL
 COMMON_CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -Iinclude
 COMMON_LDFLAGS_REQ := -lsodium -lssl -lcrypto
 
-ifeq ($(PROFILE),MINIMAL)
-  PROFILE_DEFINE := -DFILESEND_PROFILE_MINIMAL
+ifeq ($(PROFILE),MINIMAL_WS)
+  PROFILE_DEFINE := -DFILESEND_PROFILE_MINIMAL_WS
   LDFLAGS := $(COMMON_LDFLAGS_REQ)
 else ifeq ($(PROFILE),FULL)
   PROFILE_DEFINE := -DFILESEND_PROFILE_FULL
   LDFLAGS := $(COMMON_LDFLAGS_REQ) -lcurl -lpthread -lzip -larchive
+else ifeq ($(PROFILE),MINIMAL_HTTP)
+  PROFILE_DEFINE := -DFILESEND_PROFILE_MINIMAL_HTTP
+  LDFLAGS := $(COMMON_LDFLAGS_REQ) -lcurl
 else ifeq ($(PROFILE),CUSTOM)
   PROFILE_DEFINE := -DFILESEND_PROFILE_CUSTOM
   LDFLAGS := $(COMMON_LDFLAGS_REQ) -lcurl -lpthread -lzip -larchive # choose the ones you selected. For HTTP support you need -lcurl; MT - -lpthread; batching - -lzip -larchive
 else
-  $(error Unsupported PROFILE='$(PROFILE)'. Use PROFILE=FULL, PROFILE=CUSTOM or PROFILE=MINIMAL)
+  $(error Unsupported PROFILE='$(PROFILE)'. Use PROFILE=FULL, PROFILE=CUSTOM, PROFILE=MINIMAL_HTTP or PROFILE=MINIMAL_WS)
 endif
 
 CXXFLAGS := $(COMMON_CXXFLAGS) $(PROFILE_DEFINE)

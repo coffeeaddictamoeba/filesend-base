@@ -11,7 +11,9 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 - Archive option is added for sending, encryption and decryption
 - File encryption format standardized
 - Server-side logging is added
-- **Compile-time options are added**
+- Compile-time options are added
+- **Dockerization of sender and server code added**
+- **Key generation added**
 
 ### Compile-Time Options
 
@@ -19,13 +21,16 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 
 By default all of the application features are enabled, but if you want to have more control over dependencies, there are three possible options for you to choose from:
 
-| Option                       | Encryption/Decryption | WS/WSS | HTTP/HTTPS | Database | Batching | Multithreading |
-| ---------------------------- | --------------------- | ------ | ---------- | -------- | -------- | -------------- |
-| `FILESEND_PROFILE_FULL`    | +                     | +      | +          | +        | +        | +              |
-| `FILESEND_PROFILE_MINIMAL` | +                     | +      | -          | -        | -        | -              |
-| `FILESEND_PROFILE_CUSTOM`  | +                     | ?      | ?          | ?        | ?        | ?              |
+| Option                            | Encryption/Decryption | WS/WSS | HTTP/HTTPS | Database | Batching | Multithreading |
+| --------------------------------- | --------------------- | ------ | ---------- | -------- | -------- | -------------- |
+| `FILESEND_PROFILE_FULL`         | +                     | +      | +          | +        | +        | +              |
+| `FILESEND_PROFILE_MINIMAL_WS`   | +                     | +      | -          | -        | -        | -              |
+| `FILESEND_PROFILE_MINIMAL_HTTP` | +                     | -      | +          | -        | -        | -              |
+| `FILESEND_PROFILE_CUSTOM`       | +                     | ?      | ?          | ?        | ?        | ?              |
 
 `FILESEND_PROFILE_CUSTOM` allows you to specify only the features you prefer, but to do so you need to set up the necessary features inside `include/build_features.h`.
+
+`FILESEND_PROFILE_MINIMAL_*` can be used for server side to receive and decrypt the encrypted files.
 
 ### Sending Directory Layout
 
@@ -89,7 +94,7 @@ With Docker:
 ```bash
 # Build (run from filesend-base/ repo root, NOT from examples/):
 docker build \
-   -f examples/Dockerfile
+   -f examples/Dockerfile \
    --build-arg USER_UID="$(id -u)" \
    --build-arg USER_GID="$(id -g)" \
    -t filesend-server-dev .
@@ -98,6 +103,7 @@ cd examples/ # change directory so we don't copy unnecessary files once again
 
 # Run (from examples/)
 docker run --rm -it \
+   -p 8444:8444 \ # websocket
    -v "$PWD:/workspace" \
    -e SERVER_MODE=ws \  # default mode is WebSocket (WS); for HTTP additional configuraton is needed
    filesend-server-dev
@@ -109,22 +115,16 @@ docker run --rm -it \
 #    - examples/keys/sym_key-YYYY-MM-DD.bin (if symmetric)
 # Everything else is for server's security
 
-# NOTE: filesend app generates its own keys (symmetric and asymmetric) and keys generated elsewhere are NOT suitable for encryption/decryption. Running the commands above already creates all the necessary keys, but it is important to mention it. To create a pair of keys run:
-touch mytemp.txt && echo "a line of text" > mytemp.txt # create a temporary file
-unset PUB_KEY_PATH || true
-unset PR_KEY_PATH || true
-unset SYM_KEY_PATH || true
-bin/./filesend encrypt mytemp.txt --symmetric|--asymmetric # try to encrypt the file without .env sourced
-
 # NOTE: Server's config will update security info (key and certificate locations) automatically, while receiver's config will NOT: you need to enter these locations manually.
 
-# Inside the filesend-server-dev container:
+# By default, server will start right after running "docker run" command.
+
+# Inside the filesend-server-dev container (if setting "bash" instead of "server" inside Dockerfile):
 source .venv/bin/activate
 set -a && source .env && set +a
 python runserver_ws.py  # OR python runserver_https.py (if available)
 
 ```
-
 
 ### General Syntax
 
@@ -135,6 +135,7 @@ filesend send    [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [-
 filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--force] [--archive]
 filesend decrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--force] [--archive]
 filesend verify  <path> <sha256>
+filesend keygen [--symmetric|--asymmetric]
 ```
 
 #### **Configs**
@@ -189,8 +190,6 @@ pr_key_path  = pr.key                    # private key (should NOT be stored on 
 
 dest_path = my_dest/                     # destiation of processed files
 ```
-
-
 
 Example of **server** config file structure:
 
@@ -391,6 +390,29 @@ filesend verify <path> <sha256>
 ```
 
 Verifies file's SHA-256 (both raw and hex formats). Can be used on server side.
+
+#### Mode: `keygen`
+
+---
+
+```
+filesend keygen [--symmetric|--asymmetric]
+```
+
+Creates a key/keypair suitable for encryption/decryption.
+
+**NOTE:** `keygen` is possible only from CLI, config-based method does not support it.
+
+Alternative key generation method, based on file encryption without any keys available (obsolete):
+
+```bash
+# To create a pair of keys run:
+touch mytemp.txt && echo "a line of text" > mytemp.txt # create a temporary file
+unset PUB_KEY_PATH || true
+unset PR_KEY_PATH || true
+unset SYM_KEY_PATH || true
+bin/./filesend encrypt mytemp.txt --symmetric|--asymmetric # try to encrypt the file without .env sourced
+```
 
 ### Notes & Recommendations
 

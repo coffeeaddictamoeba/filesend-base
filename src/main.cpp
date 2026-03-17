@@ -58,7 +58,8 @@ int main(int argc, char** argv) {
             fprintf(
                 stderr, 
                 RED "[ERROR] The program was compiled without support for sending over WS."
-                " To enable it, compile with -DFILESEND_PROFILE_FULL or try sending over HTTP (if enabled)\n" RESET
+                " To enable it, compile with -DFILESEND_PROFILE_FULL, -DFILESEND_PROFILE_MINIMAL_WS"
+                " or try sending over HTTP (if enabled)\n" RESET
             );
 
             return EXIT_FAILURE;
@@ -74,7 +75,8 @@ int main(int argc, char** argv) {
             fprintf(
                 stderr, 
                 RED "[ERROR] The program was compiled without support for sending over HTTP."
-                " To enable it, compile with -DFILESEND_PROFILE_FULL or try sending over WebSocket (if enabled)\n" RESET
+                " To enable it, compile with -DFILESEND_PROFILE_FULL, -DFILESEND_PROFILE_MINIMAL_HTTP"
+                " or try sending over WebSocket (if enabled)\n" RESET
             );
 
             return EXIT_FAILURE;
@@ -116,6 +118,45 @@ int main(int argc, char** argv) {
             sha_received,
             strlen(sha_received)
         ) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    else if (strcmp(cf.mode.c_str(), "keygen") == 0) { // generate keypair
+
+        if (cf.policy.is_encryption_symmetric()) { // SYMMETRIC
+
+            unsigned char key[crypto_secretstream_xchacha20poly1305_KEYBYTES];
+            if (create_symmetric_key(cf.policy.enc_p.key_path.c_str(), key, sizeof key) != 0) {
+                fprintf(
+                    stderr,
+                    RED "[ERROR] Failed to create symmetric key\n" RESET
+                );
+                return EXIT_FAILURE;
+            }
+
+            return EXIT_SUCCESS;
+
+        } else { // ASYMMETRIC
+
+            unsigned char pub_key[crypto_box_PUBLICKEYBYTES];
+            unsigned char pr_key [crypto_box_SECRETKEYBYTES];
+
+            printf("[DEBUG] Asymmetric key generation started\n");
+
+            if (create_asymmetric_key_pair(
+                    cf.policy.enc_p.key_path.c_str(),
+                    cf.policy.enc_p.dec_key_path.c_str(),
+                    pub_key,
+                    sizeof pub_key) != 0) 
+            {
+                fprintf(
+                    stderr,
+                    RED "[ERROR] Failed to create asymmetric key\n" RESET
+                );
+                return EXIT_FAILURE;
+            }
+
+            return EXIT_SUCCESS;
+        }
     }
 
     // ENCRYPT / DECRYPT MODES

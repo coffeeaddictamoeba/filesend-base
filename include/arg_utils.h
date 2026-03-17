@@ -23,6 +23,7 @@ private:
     void handle_encrypt(int argc, char** argv);
     void handle_decrypt(int argc, char** argv);
     void handle_verify(int argc, char** argv);
+    void handle_keygen(int argc, char** argv);
 
     // General handlers
     void handle_mode_timeout(int& value, int argc, char** argv);

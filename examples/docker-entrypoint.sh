@@ -2,8 +2,9 @@
 set -euo pipefail
 
 WORKDIR="${WORKDIR:-/workspace}"
-SERVER_MODE="${SERVER_MODE:-ws}"                       # ws | https
-AUTO_BOOTSTRAP="${AUTO_BOOTSTRAP:-1}"                 # 1=yes, 0=no
+SERVER_MODE="${SERVER_MODE:-ws}"                      # ws | https
+SERVER_PORT="${SERVER_PORT:-8444}"                   # server port
+AUTO_BOOTSTRAP="${AUTO_BOOTSTRAP:-1}"                # 1=yes, 0=no
 AUTO_GENERATE_SECURITY="${AUTO_GENERATE_SECURITY:-1}" # 1=yes, 0=no
 CERT_SUBJECT="${CERT_SUBJECT:-/CN=localhost}"
 DEVICE_ID_VALUE="${DEVICE_ID_VALUE:-device_id}"
@@ -13,6 +14,7 @@ cd "${WORKDIR}"
 
 echo "Working directory: ${WORKDIR}"
 echo "Server mode: ${SERVER_MODE}"
+echo "Server port: ${SERVER_PORT}"
 
 copy_if_missing() {
   local src="$1"
@@ -96,6 +98,130 @@ read_env_export_value() {
   local file="$1"
   local var="$2"
   sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?${var}=(.*)[[:space:]]*$/\2/p" "$file" | tail -n1
+}
+
+trim_wrapping_quotes() {
+  local v="$1"
+
+  if [[ "$v" == \"*\" && "$v" == *\" ]]; then
+    v="${v#\"}"
+    v="${v%\"}"
+  elif [[ "$v" == \'*\' && "$v" == *\' ]]; then
+    v="${v#\'}"
+    v="${v%\'}"
+  fi
+
+  printf '%s' "$v"
+}
+
+resolve_path_from_file() {
+  local base_file="$1"
+  local raw_path="$2"
+
+  raw_path="$(trim_wrapping_quotes "$raw_path")"
+  [[ -n "$raw_path" ]] || return 1
+
+  if [[ "$raw_path" = /* ]]; then
+    printf '%s\n' "$raw_path"
+    return 0
+  fi
+
+  local base_dir
+  base_dir="$(cd -- "$(dirname -- "$base_file")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s\n' "$base_dir" "$raw_path"
+}
+
+path_from_file_exists() {
+  local base_file="$1"
+  local raw_path="$2"
+  local resolved=""
+
+  resolved="$(resolve_path_from_file "$base_file" "$raw_path" || true)"
+  [[ -n "$resolved" && -f "$resolved" ]]
+}
+
+_filename_matches_tokens() {
+  local filename="$1"
+  shift
+
+  local normalized
+  normalized="$(
+    printf '%s' "$filename" \
+      | tr '[:upper:]' '[:lower:]' \
+      | sed -E 's/[^a-z0-9]+/ /g'
+  )"
+
+  local token=""
+  for token in "$@"; do
+    local t
+    t="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+    [[ " $normalized " == *" $t "* ]] || return 1
+  done
+
+  return 0
+}
+
+find_security_file() {
+  local search_dir="$1"
+  shift
+
+  [[ -d "$search_dir" ]] || return 1
+
+  local path=""
+  while IFS= read -r -d '' path; do
+    if _filename_matches_tokens "$(basename "$path")" "$@"; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done < <(find "$search_dir" -type f -print0 2>/dev/null | sort -z)
+
+  return 1
+}
+
+select_security_material() {
+  local key_dir="${1:-keys}"
+  local cert_dir="${2:-certs}"
+
+  FOUND_ASYM_PRIVATE_PATH="$(find_security_file "$key_dir" pr key || true)"
+  FOUND_ASYM_PUBLIC_PATH="$(find_security_file "$key_dir" pub key || true)"
+  FOUND_SYM_KEY_PATH="$(find_security_file "$key_dir" sym key || true)"
+
+  FOUND_CA_CERT_PATH="$(find_security_file "$cert_dir" ca cert || true)"
+  FOUND_SERVER_KEY_PATH="$(find_security_file "$key_dir" server key || true)"
+  FOUND_SERVER_CERT_PATH="$(find_security_file "$cert_dir" server crt || true)"
+
+  if [[ -z "${FOUND_SERVER_CERT_PATH}" ]]; then
+    FOUND_SERVER_CERT_PATH="$(find_security_file "$cert_dir" server cert || true)"
+  fi
+
+  export FOUND_ASYM_PRIVATE_PATH
+  export FOUND_ASYM_PUBLIC_PATH
+  export FOUND_SYM_KEY_PATH
+  export FOUND_CA_CERT_PATH
+  export FOUND_SERVER_KEY_PATH
+  export FOUND_SERVER_CERT_PATH
+}
+
+# Returns:
+#   0 => generation IS needed
+#   1 => generation is NOT needed
+security_material_missing() {
+  select_security_material "keys" "certs"
+
+  [[ -n "${FOUND_ASYM_PRIVATE_PATH}" && -f "${FOUND_ASYM_PRIVATE_PATH}" ]] || return 0
+  [[ -n "${FOUND_CA_CERT_PATH}" && -f "${FOUND_CA_CERT_PATH}" ]] || return 0
+  [[ -n "${FOUND_SERVER_KEY_PATH}" && -f "${FOUND_SERVER_KEY_PATH}" ]] || return 0
+  [[ -n "${FOUND_SERVER_CERT_PATH}" && -f "${FOUND_SERVER_CERT_PATH}" ]] || return 0
+
+  if [[ -n "${FOUND_ASYM_PUBLIC_PATH}" && -f "${FOUND_ASYM_PUBLIC_PATH}" ]]; then
+    return 1
+  fi
+
+  if [[ -n "${FOUND_SYM_KEY_PATH}" && -f "${FOUND_SYM_KEY_PATH}" ]]; then
+    return 1
+  fi
+
+  return 0
 }
 
 generate_filesend_keys() {
@@ -204,7 +330,7 @@ generate_security() {
     openssl req -new \
       -key "${SERVER_KEY_PATH_GEN}" \
       -out "${SERVER_CSR_PATH_GEN}" \
-      -subj "/CN=localhost"
+      -subj "${CERT_SUBJECT}"
     echo "Created ${SERVER_CSR_PATH_GEN}"
   else
     echo "Exists: ${SERVER_CSR_PATH_GEN}"
@@ -230,8 +356,20 @@ EOF
   else
     echo "Exists: ${SERVER_CERT_PATH_GEN}"
   fi
+
+  # Refresh detected paths after generation so update_* uses actual files.
+  select_security_material "keys" "certs"
+  ASYM_PRIVATE_PATH_GEN="${FOUND_ASYM_PRIVATE_PATH}"
+  ASYM_PUBLIC_PATH_GEN="${FOUND_ASYM_PUBLIC_PATH}"
+  SYM_KEY_PATH_GEN="${FOUND_SYM_KEY_PATH}"
+  CA_CERT_PATH_GEN="${FOUND_CA_CERT_PATH}"
+  SERVER_KEY_PATH_GEN="${FOUND_SERVER_KEY_PATH}"
+  SERVER_CERT_PATH_GEN="${FOUND_SERVER_CERT_PATH}"
 }
 
+# Returns:
+#   0 => .env should be updated
+#   1 => .env looks usable as-is
 env_needs_security_update() {
   local env_file="$1"
   [[ -f "$env_file" ]] || return 0
@@ -246,21 +384,23 @@ env_needs_security_update() {
   cert_path="$(read_env_export_value "$env_file" "CERT_PATH" || true)"
   pr_key_path="$(read_env_export_value "$env_file" "PR_KEY_PATH" || true)"
 
-  [[ -n "$cert_path" && -f "$cert_path" ]] || return 0
-  [[ -n "$pr_key_path" && -f "$pr_key_path" ]] || return 0
+  path_from_file_exists "$env_file" "$cert_path" || return 0
+  path_from_file_exists "$env_file" "$pr_key_path" || return 0
 
-  # At least one of PUB_KEY_PATH or SYM_KEY_PATH should exist.
-  if [[ -n "$pub_key_path" && -f "$pub_key_path" ]]; then
+  if path_from_file_exists "$env_file" "$pub_key_path"; then
     return 1
   fi
 
-  if [[ -n "$sym_key_path" && -f "$sym_key_path" ]]; then
+  if path_from_file_exists "$env_file" "$sym_key_path"; then
     return 1
   fi
 
   return 0
 }
 
+# Returns:
+#   0 => config should be updated
+#   1 => config looks usable as-is
 config_needs_security_update() {
   local cfg="$1"
   [[ -f "$cfg" ]] || return 0
@@ -271,8 +411,8 @@ config_needs_security_update() {
   cert_path="$(read_config_value "$cfg" "cert_path" || true)"
   key_path="$(read_config_value "$cfg" "key_path" || true)"
 
-  [[ -n "$cert_path" && -f "$cert_path" ]] || return 0
-  [[ -n "$key_path" && -f "$key_path" ]] || return 0
+  path_from_file_exists "$cfg" "$cert_path" || return 0
+  path_from_file_exists "$cfg" "$key_path" || return 0
 
   return 1
 }
@@ -321,7 +461,7 @@ bootstrap_repo() {
     echo "bin/filesend is missing or not executable"
     return 1
   fi
-  
+
   if [[ "${SERVER_MODE}" == "https" ]]; then
     copy_if_missing "examples/runserver_https.py" "runserver_https.py"
   else
@@ -359,6 +499,45 @@ bootstrap_repo() {
   fi
 }
 
+load_runtime_env() {
+  if [[ -f ".venv/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+  else
+    echo "Missing virtualenv: .venv/bin/activate"
+    return 1
+  fi
+
+  if [[ -f ".env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+    echo "Loaded .env"
+  else
+    echo "No .env found"
+  fi
+}
+
+start_server() {
+  load_runtime_env
+
+  case "${SERVER_MODE}" in
+    ws)
+      echo "Starting WebSocket server"
+      exec python runserver_ws.py
+      ;;
+    https)
+      echo "Starting HTTPS server"
+      exec python runserver_https.py
+      ;;
+    *)
+      echo "Unsupported SERVER_MODE: ${SERVER_MODE}"
+      exit 1
+      ;;
+  esac
+}
+
 print_help() {
   cat <<'EOF'
 
@@ -382,7 +561,8 @@ Sender side example:
 Notes:
 - Generated files are written into the bind-mounted repo, so they appear on your host
 - Files use date-based names
-- server_config and .env are patched automatically when referenced security files are missing
+- Existing security material is detected from keys/ and certs/
+- .env and server_config are patched independently if they contain stale paths
 
 EOF
 }
@@ -393,25 +573,68 @@ fi
 
 if [[ "${AUTO_GENERATE_SECURITY}" == "1" ]]; then
   NEED_GEN=0
+  NEED_CFG_UPDATE=0
+  NEED_ENV_UPDATE=0
 
-  if config_needs_security_update "server_config"; then
+  # Decide generation from actual material on disk only.
+  if security_material_missing; then
     NEED_GEN=1
+  fi
+
+  # Decide file refresh independently.
+  if config_needs_security_update "server_config"; then
+    NEED_CFG_UPDATE=1
   fi
 
   if env_needs_security_update ".env"; then
-    NEED_GEN=1
+    NEED_ENV_UPDATE=1
   fi
 
   if [[ "${NEED_GEN}" == "1" ]]; then
-    echo "Security data missing or invalid; generating test security material"
+    echo "Security material missing; generating test security material"
     generate_security
-    update_server_config_security "server_config"
-    update_dotenv_security ".env"
+
+    # Fresh material means references should be refreshed too.
+    NEED_CFG_UPDATE=1
+    NEED_ENV_UPDATE=1
   else
-    echo "Existing security references in server_config and .env look usable; no update needed"
+    # Material exists already; expose discovered paths so update_* can repair stale config.
+    select_security_material "keys" "certs"
+    ASYM_PRIVATE_PATH_GEN="${FOUND_ASYM_PRIVATE_PATH}"
+    ASYM_PUBLIC_PATH_GEN="${FOUND_ASYM_PUBLIC_PATH}"
+    SYM_KEY_PATH_GEN="${FOUND_SYM_KEY_PATH}"
+    CA_CERT_PATH_GEN="${FOUND_CA_CERT_PATH}"
+    SERVER_KEY_PATH_GEN="${FOUND_SERVER_KEY_PATH}"
+    SERVER_CERT_PATH_GEN="${FOUND_SERVER_CERT_PATH}"
+  fi
+
+  if [[ "${NEED_CFG_UPDATE}" == "1" ]]; then
+    echo "Updating security references in server_config"
+    update_server_config_security "server_config"
+  fi
+
+  if [[ "${NEED_ENV_UPDATE}" == "1" ]]; then
+    echo "Updating security references in .env"
+    update_dotenv_security ".env"
+  fi
+
+  if [[ "${NEED_GEN}" != "1" &&
+        "${NEED_CFG_UPDATE}" != "1" &&
+        "${NEED_ENV_UPDATE}" != "1" ]]; then
+    echo "Existing security material and references look usable; no update needed"
   fi
 fi
 
 print_help
 
-exec "$@"
+case "${1:-server}" in
+  server)
+    start_server
+    ;;
+  bash|sh)
+    exec "$@"
+    ;;
+  *)
+    exec "$@"
+    ;;
+esac
