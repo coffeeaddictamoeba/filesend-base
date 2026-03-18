@@ -12,6 +12,8 @@
 #   -e SERVER_MODE=ws \
 #   filesend-server-dev
 
+# After running the container the server will start automatically by default.
+
 # Inside the container (if running as bash):
 # source .venv/bin/activate
 # set -a && source .env && set +a
@@ -79,7 +81,7 @@ RUN chmod +x /opt/filesend/filesend /usr/local/bin/docker-entrypoint.sh
 
 USER ${USER_NAME}
 
-EXPOSE 8080
+EXPOSE 8444
 
 # Entrypoint helps to configure all the security materials for testing,
 # including keys (symmetric & asymmetric (public/private)), server certificates, etc.

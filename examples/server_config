@@ -29,8 +29,8 @@ db_path = received_files.sqlite3
 
 [tls]
 # If cert/key are empty or absent => runs with no TLS
-cert_path = certs/server.crt
-key_path  = keys/server.key
+cert_path = certs/server-date.crt
+key_path = keys/server-date.key
 
 [filesend]
 bin_path = bin/filesend
