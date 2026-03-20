@@ -15,6 +15,99 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 - **Dockerization of sender and server code added**
 - **Key generation added**
 
+### Defaults
+
+---
+
+- Program is compiled with `FILESEND_PROFILE_FULL` and server is compiled with `FILESEND_PROFILE_MINIMAL_WS`
+- When running a server with **Docker**, all the necessary security material (server key, server certificate, encryption keys) is generated and `server_config` is updated **automatically **
+- When running a server with **Docker**, server starts **automatically**
+- Sender's `filesend_config` needs **manual update** to match server's security material (server's CA certificate and encryption keys), as **default configs use test key locations**. More secure setup needs specialized protected key locations with limited permissions.
+
+#### Default Configuration Setup
+
+---
+
+1. Build **server** container from the repo root `filesend-base/`:
+
+   ```bash
+   docker build \
+      -f examples/Dockerfile \
+      --build-arg USER_UID="$(id -u)" \
+      --build-arg USER_GID="$(id -g)" \
+      -t filesend-server-dev .
+   ```
+2. Run server from `examples/` directory ():
+
+   ```bash
+   docker run --rm -it \
+      -p 8444:8444 \
+      -v "$PWD:/workspace" \
+      -e SERVER_MODE=ws \
+      filesend-server-dev
+   ```
+3. Copy the `ca_cert-date.pem`, `pub-date.key` and `pr-date.key` to the sender (machine running `filesend`) and change the `filesend_config` accordingly.
+4. Either compile natively (see the list of dependencies and compile options below) or build a container for the **application** from the repo root `filesend-base/`. Do this in a separate process or shell, if running both server and filesend application code on a single machine.
+
+   ```bash
+   # Skip first two commands if compiling natively
+   docker build -t filesend-app . 
+
+   docker run --rm -it \
+      --name filesend-dev \
+      --user "$(id -u):$(id -g)" \
+      --network=host \
+      -v "$(pwd):/workspace" \
+      -w /workspace \
+      filesend-app
+
+   # Either inside of container or natively, compile with:
+   make # -DFILESEND_PROFILE_*
+   ```
+5. After successful compilation, try running `filesend` with some directory containing files. If running from Docker container, this directory should be inside the mounted folder.
+
+   ```bash
+   # Directory tree expected:
+   # my_dir/        <- run filesend from here
+   # - my_files/    <- contains files to send
+   # - <...>
+
+   cd my_dir/
+
+   path/to/./filesend send my_files/
+   ```
+6. Both of the sides (server and sender) have their logs which explicitly show if sending succeeded or not, and if not then what was the reason.
+
+#### Common Problems
+
+---
+
+1. `decrypt failed`
+
+   * In server logs: ` ERROR | peer=ip:port device=my_device file=my_file.ext.enc | decrypt failed (code=1)`
+   * This problem occurs if keys on server and sender sides do not match. To find the reason of the mismatch, check:
+     * Are config vaues of key names match on server and sender? Do these keys have same contents?
+     * Does the `filesend` binary see the keys?
+     * Was the file encrypted?
+     * Is `.env` sourced on server? If using CLI, is `.env` sourced on sender? Are `.env` values correct?
+   * **Fix:** try to regenerate the keys and update values in configs and `.env`s.
+2. On sender: `connection refused`
+
+   * In sender logs: `[WS] connect_tls exception: connect: Connection refused [system:111 at ... in function 'connect']`
+   * This problem occurs when the sender and server ports do not match or the server is not running.
+     * Check configuration files of both sender and server. Compare sender's `url` field with server's `port` and `host` fields.
+     * Check if server is running.
+     * Check if you run the correct server (i.e, if sending via WebSocket, running server should be `runserver_ws.py`)
+     * If using Docker, check if correct port is exposed and passed in `-p` option when running the container.
+   * **Fix:** if you have a problem connecting to a certain port, either change it or temporarily enable network by passing `--network=host` to the server's container on run.
+3. On server: `device token missing`
+
+   * Server logs: `Auth is enabled but token file is missing/empty (devtokens.json). All devices will be rejected.`
+   * This problem occurs if `server_config` has `require_auth = true` and `devtokens.json` (file with device tokens) does not contain the correct device token.
+     * Check if `devtokens.json` exists and has a correct device token.
+     * Check if sender's config `filesend_config` has `device_id` set to to device token.
+   * **Fix:** if error persists, try setting `require_auth` in `server_config` to `false` or generate new device token and update the necessary files.
+
 ### Compile-Time Options
 
 ---
@@ -137,6 +230,19 @@ filesend decrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--fo
 filesend verify  <path> <sha256>
 filesend keygen [--symmetric|--asymmetric]
 ```
+
+#### **Limitations**
+
+---
+
+**NOTE:** the options are mostly **independent** (any combination possible) and **protected** (will fail early if some field is incorrect or missing). However, **you cannot:**
+
+- Send via both HTTP and WS simultaneously: select only one
+- Encrypt with symmetric and asymmetric keys at the same time: it will break the encryption. Stick with **one** preferred key cryptosystem.
+- Pass both `--retry <n>` and `--no-retry` : these options are for **opposite scenarios**. It is not recommended to use `--retry 0` instead of `--no-retry`.
+- Not an error, but **avoid sending a single file** instead of a directory with `--batch` option. It will work, but there is no need to create a batch out of 1 file.
+
+**IMPORTANT:** These limitations apply to **config-based setup** as well.
 
 #### **Configs**
 
@@ -272,33 +378,29 @@ filesend send [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--al
 
 The environment variables are used for server to decrypt the encrypted file (as it uses `filesend` CLI) and in CLI mode for `filesend`. If you run `filesend` with the config, `.env` is ignored.
 
-`CERT_PATH` – path to CA certificate used to validate server TLS certificate (both HTTPS and WS)
-
-`SYM_KEY_PATH` – path to symmetric key (if symmetric mode is chosen)
-
-`PUB_KEY_PATH`, `PR_KEY_PATH` – paths to public/private key pair (asymmetric mode)
+- `CERT_PATH` – path to CA certificate used to validate server TLS certificate (both HTTPS and WS)
+- `SYM_KEY_PATH` – path to symmetric key (if symmetric mode is chosen)
+- `PUB_KEY_PATH`, `PR_KEY_PATH` – paths to public/private key pair (asymmetric mode)
 
 **Examples**
 
 - Send a file **without** encrypting it: `filesend send data/report.bin "https://myserver.local:8443/upload"`
 - Send with symmetric encryption:
 
-```
+```bash
 export SYM_KEY_PATH=/etc/myapp/sym.key
 export CERT_PATH=/etc/myapp/ca_cert.pem
 
-filesend send --https images/photo.png "https://myserver.local:8443/upload" \
-    --encrypt symmetric
+filesend send --https images/photo.png "https://myserver.local:8443/upload" --encrypt symmetric
 ```
 
 - Send from a folder (`logs`) with asymmetric encryption and metadata protection (and stop after a timeout of 30 secs):
 
-```
+```bash
 export PUB_KEY_PATH=/etc/myapp/server_box_pk.bin
 export CERT_PATH=/etc/myapp/ca_cert.pem
 
-filesend send --ws logs "ws://0.0.0.0:8444/ws" \
-    --encrypt asymmetric --all --timeout 30
+filesend send --ws logs "ws://0.0.0.0:8444/ws" --encrypt asymmetric --all --timeout 30
 ```
 
 #### Mode: `encrypt`
@@ -324,15 +426,17 @@ Arguments:
 
 - Asymmetric encryption with metadata (The encrypted output will default to `raw/data.bin`):
 
-```
+```bash
 export PUB_KEY_PATH=/etc/myapp/server_box_pk.bin
+
 filesend encrypt raw/data.bin --asymmetric --all
 ```
 
 - Symmetric encryption:
 
-```
+```bash
 export PUB_KEY_PATH=/etc/myapp/server_box_pk.bin
+
 filesend encrypt raw/data.bin --symmetric --all
 ```
 
@@ -364,21 +468,19 @@ Examples:
 
 - Decrypt symmetric file:
 
-```
-export SYM_KEY_PATH=/etc/myapp/sym.key
+```bash
+export SYM_KEY_PATH=/etc/myapp/sym.key # or source .env
 
-filesend decrypt backups/db.enc \
-    --symmetric --dest db_restored.sql
+filesend decrypt backups/db.enc -symmetric --dest db_restored.sql
 ```
 
 - Decrypt asymmetric encrypted file with metadata
 
-```
+```bash
 export PUB_KEY_PATH=/etc/myapp/server_box_pk.bin
 export PR_KEY_PATH=/etc/myapp/server_box_sk.bin
 
-filesend decrypt images/cam01.img.enc \
-    --asymmetric --all
+filesend decrypt images/cam01.img.enc --asymmetric --all
 ```
 
 #### Mode: `verify`
@@ -429,7 +531,7 @@ bin/./filesend encrypt mytemp.txt --symmetric|--asymmetric # try to encrypt the 
 
 ---
 
-```
+```bash
 # CA private key
 openssl genrsa -out myCA.key 4096
 
