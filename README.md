@@ -23,6 +23,8 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 - When running a server with **Docker**, all the necessary security material (server key, server certificate, encryption keys) is generated and `server_config` is updated **automatically **
 - When running a server with **Docker**, server starts **automatically**
 - Sender's `filesend_config` needs **manual update** to match server's security material (server's CA certificate and encryption keys), as **default configs use test key locations**. More secure setup needs specialized protected key locations with limited permissions.
+- Sender's `filesend` and server are expected to be **different devices** on the **same network** (but you still can run both as separate processes on one machine for testing purposes)
+- `--retry <n>` option in `filesend` (same as `retry` field in `filesend_config` ) will retry **only in case of connection failure** but NOT in case of failed file processing
 
 #### Default Configuration Setup
 
@@ -32,12 +34,12 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 
    ```bash
    docker build \
-      -f examples/Dockerfile \
+      -f Dockerfile.server \
       --build-arg USER_UID="$(id -u)" \
       --build-arg USER_GID="$(id -g)" \
       -t filesend-server-dev .
    ```
-2. Run server from `examples/` directory ():
+2. Run server from `examples/` directory (so we do not copy the files present in `examples/` to the current directory once again):
 
    ```bash
    docker run --rm -it \
@@ -51,8 +53,15 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 
    ```bash
    # Skip first two commands if compiling natively
-   docker build -t filesend-app . 
 
+   # Build
+   docker build \
+      -f Dockerfile.sender \
+      --build-arg USER_ID="$(id -u)" \
+      --build-arg GROUP_ID="$(id -u)" \
+      -t filesend-app . 
+
+   # Run
    docker run --rm -it \
       --name filesend-dev \
       --user "$(id -u):$(id -g)" \
@@ -74,6 +83,7 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 
    cd my_dir/
 
+   # Run the filesend binary (this exact command will use filesend_config to set up the paramenters of running)
    path/to/./filesend send my_files/
    ```
 6. Both of the sides (server and sender) have their logs which explicitly show if sending succeeded or not, and if not then what was the reason.
@@ -142,35 +152,13 @@ Assume your initial directory for incoming images is `mydir/`
   * `work` - directory for threads to divide the work on files.
 * `mydir/.filesend_cache` - if the database is enabled, this file stores data about sent files to ignore processing a file twice.
 
-### Building Project
+### List of Dependencies Used
 
 ---
 
-#### Building `filesend-app`
+**NOTE:** if using Docker containers, the only dependency needed overall is Docker itself.
 
-With Docker:
-
-```bash
-# Build (from the repo root, filesend-base/)
-docker build -t filesend-app . 
-
-# Run
-docker run --rm -it \
-   --name filesend-dev \
-   --user "$(id -u):$(id -g)" \
-   --network=host \
-   -v "$(pwd):/workspace" \
-   -w /workspace \
-   filesend-app
-
-# Then, in filesend-app container
-make
-
-# If planning to run and use CLI, run:
-source .env # with security material data; update if needed
-```
-
-List of dependencies used:
+These dependencies are required to run `filesend`:
 
 - libsodium (cryptography; necessary)
 - libssl (secure connection; necessary)
@@ -178,46 +166,10 @@ List of dependencies used:
 - libboost for boost.beast and boost.asio headers (WebSocket connection; necessary, but can be optional if HTTP connection dependency is present)
 - libzip & libarchive (batch archives in `zip`, `tar` and `tar.gz` formats)
 
-#### Building `filesend-server`
+These dependencies are required to run server (pip):
 
-Dockerfile for the server can be found in `examples/` directory, where examples of server code and configs are.
-
-With Docker:
-
-```bash
-# Build (run from filesend-base/ repo root, NOT from examples/):
-docker build \
-   -f examples/Dockerfile \
-   --build-arg USER_UID="$(id -u)" \
-   --build-arg USER_GID="$(id -g)" \
-   -t filesend-server-dev .
-
-cd examples/ # change directory so we don't copy unnecessary files once again
-
-# Run (from examples/)
-docker run --rm -it \
-   -p 8444:8444 \ # websocket
-   -v "$PWD:/workspace" \
-   -e SERVER_MODE=ws \  # default mode is WebSocket (WS); for HTTP additional configuraton is needed
-   filesend-server-dev
-
-# Running filesend-server-dev for the first time will generate the security material, such as symmetric/asymmetric keys, server certificate and server keys
-# To interact with the server, sender that runs filesend-base app needs to have security material from these locations:
-#    - examples/certs/ca-cert-YYYY-MM-DD.pem
-#    - examples/keys/pub_key-YYYY-MM-DD.bin (if asymmetric; do NOT copy the private key to sender)
-#    - examples/keys/sym_key-YYYY-MM-DD.bin (if symmetric)
-# Everything else is for server's security
-
-# NOTE: Server's config will update security info (key and certificate locations) automatically, while receiver's config will NOT: you need to enter these locations manually.
-
-# By default, server will start right after running "docker run" command.
-
-# Inside the filesend-server-dev container (if setting "bash" instead of "server" inside Dockerfile):
-source .venv/bin/activate
-set -a && source .env && set +a
-python runserver_ws.py  # OR python runserver_https.py (if available)
-
-```
+- websockets (if using WebSocket)
+- aiohttp (if using HTTP)
 
 ### General Syntax
 

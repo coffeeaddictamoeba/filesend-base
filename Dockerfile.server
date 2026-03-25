@@ -1,6 +1,6 @@
 # Build (run from filesend-base repo root):
 # docker build \
-#   -f examples/Dockerfile \
+#   -f Dockerfile.server \
 #   --build-arg USER_UID="$(id -u)" \
 #   --build-arg USER_GID="$(id -g)" \
 #   -t filesend-server-dev .

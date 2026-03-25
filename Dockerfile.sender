@@ -1,4 +1,9 @@
-# Build: docker build -t filesend-app . 
+# Build: 
+# docker build \
+#    -f Dockerfile.sender \
+#    --build-arg USER_ID="$(id -u)" \
+#    --build-arg GROUP_ID="$(id -u)" \
+#    -t filesend-app . 
 
 # Run: 
 # docker run --rm -it \
@@ -9,20 +14,17 @@
 #   -w /workspace \
 #   filesend-app
 
-FROM ubuntu:24.04
+FROM debian:bullseye-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install required dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     g++ \
     make \
     cmake \
     pkg-config \
-    gdb \
-    nano \
-    less \
-    bash \
     ca-certificates \
     openssl \
     libssl-dev \
@@ -36,26 +38,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Set the working directory
+WORKDIR /workspace
+
+# Default user settings via build args
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=user
 
-WORKDIR /workspace
-
-RUN set -eux; \
-    EXISTING_GROUP="$(getent group ${GROUP_ID} | cut -d: -f1 || true)"; \
-    if [ -z "$EXISTING_GROUP" ]; then \
-        groupadd -g ${GROUP_ID} ${USERNAME}; \
-        EXISTING_GROUP="${USERNAME}"; \
-    fi; \
-    EXISTING_USER="$(getent passwd ${USER_ID} | cut -d: -f1 || true)"; \
-    if [ -z "$EXISTING_USER" ]; then \
-        useradd -m -u ${USER_ID} -g ${GROUP_ID} -s /bin/bash ${USERNAME}; \
-        EXISTING_USER="${USERNAME}"; \
-    fi; \
-    mkdir -p /workspace/incoming_files; \
+# Create group and user, set permissions for /workspace
+RUN groupadd -g ${GROUP_ID} ${USERNAME} && \
+    useradd -m -u ${USER_ID} -g ${GROUP_ID} -s /bin/bash ${USERNAME} && \
+    mkdir -p /workspace/incoming_files && \
     chown -R ${USER_ID}:${GROUP_ID} /workspace
 
+# Switch to the newly created user
 USER ${USER_ID}:${GROUP_ID}
 
+# Default command
 CMD ["/bin/bash"]
