@@ -1,0 +1,28 @@
+{
+  "repo_root": ".",
+  "server": {
+    "dockerfile": "Dockerfile.server",
+    "image": "filesend-server-dev",
+    "container_name": "filesend-server-dev",
+    "workspace_dir": "server",
+    "port_map": "8444:8444",
+    "env": {
+      "SERVER_MODE": "ws"
+    }
+  },
+  "app": {
+    "dockerfile": "Dockerfile.sender",
+    "image": "filesend-app",
+    "container_name": "filesend-app",
+    "workspace_dir": ".",
+    "network": "host"
+  },
+  "server_connection": {
+    "mode": "ws",
+    "url": "127.0.0.1:8444"
+  },
+  "devices": [
+    { "id": "device_1" },
+    { "id": "device_2" }
+  ]
+}

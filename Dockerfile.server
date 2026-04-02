@@ -5,7 +5,7 @@
 #   --build-arg USER_GID="$(id -g)" \
 #   -t filesend-server-dev .
 
-# Run (run from filesend-base/examples and set server mode; either WS or HTTP; WS preferred):
+# Run (run from filesend-base/server and set server mode; either WS or HTTP; WS preferred):
 # docker run --rm -it \
 #   -p 8444:8444 \
 #   -v "$PWD:/workspace" \
@@ -75,7 +75,7 @@ RUN groupadd --gid "${USER_GID}" "${USER_NAME}" \
 WORKDIR ${WORKDIR}
 
 COPY --from=builder /build/bin/filesend /opt/filesend/filesend
-COPY examples/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /opt/filesend/filesend /usr/local/bin/docker-entrypoint.sh
 
@@ -87,9 +87,9 @@ EXPOSE 8444
 # including keys (symmetric & asymmetric (public/private)), server certificates, etc.
 
 # If sender device lacks security material, this is what should be copied:
-#    - examples/certs/ca-cert-YYYY-MM-DD.pem
-#    - examples/keys/pub_key-YYYY-MM-DD.bin (if asymmetric; do NOT copy the private key to sender)
-#    - examples/keys/sym_key-YYYY-MM-DD.bin (if symmetric)
+#    - server/certs/ca-cert-YYYY-MM-DD.pem
+#    - server/keys/pub_key-YYYY-MM-DD.bin (if asymmetric; do NOT copy the private key to sender)
+#    - server/keys/sym_key-YYYY-MM-DD.bin (if symmetric)
 # Everything else is for server's security
 
 # Set the proper values in filesend_config after copying

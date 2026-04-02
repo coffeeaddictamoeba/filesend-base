@@ -3,8 +3,8 @@ set -euo pipefail
 
 WORKDIR="${WORKDIR:-/workspace}"
 SERVER_MODE="${SERVER_MODE:-ws}"                      # ws | https
-SERVER_PORT="${SERVER_PORT:-8444}"                   # server port
-AUTO_BOOTSTRAP="${AUTO_BOOTSTRAP:-1}"                # 1=yes, 0=no
+SERVER_PORT="${SERVER_PORT:-8444}"                    # server port
+AUTO_BOOTSTRAP="${AUTO_BOOTSTRAP:-1}"                 # 1=yes, 0=no
 AUTO_GENERATE_SECURITY="${AUTO_GENERATE_SECURITY:-1}" # 1=yes, 0=no
 CERT_SUBJECT="${CERT_SUBJECT:-/CN=localhost}"
 DEVICE_ID_VALUE="${DEVICE_ID_VALUE:-device_id}"

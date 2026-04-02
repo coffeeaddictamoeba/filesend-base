@@ -45,8 +45,13 @@ bin/
 lib/
 obj/
 
-examples/security
-examples/keys
-examples/certs
-examples/.venv
-examples/logs
+.venv/
+.tmp-keys/
+keys/
+logs/
+certs/
+crypto/
+decrypted/
+incoming/
+
+*.sqlite3

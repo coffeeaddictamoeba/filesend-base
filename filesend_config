@@ -16,8 +16,9 @@ use_config = true
 url = wss://0.0.0.0:8444
 use_ws = true
 
-timeout = 5
-retry = 3
+# negative timeout means watching mode (never stops)
+timeout = -1
+retry = 5
 nthreads = 3
 batch_size = 1
 batch_format = zip

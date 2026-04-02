@@ -30,16 +30,27 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 
 ---
 
+##### **Fast setup using `node-setup.sh`**
+
+```bash
+chmod +x node-setup.sh       # allow execution
+./node-setup.sh --one        # run for testing on single device (creates server + app containers, leaves in app container's shell)
+./node-setup.sh --multiple   # run for starting the server and generating all the necessary device configuration inside crypto/asymm/devices (or crypto/symm/devices)
+```
+
+##### Manual Setup
+
 1. Build **server** container from the repo root `filesend-base/`:
 
-   ```bash
+```bash
    docker build \
       -f Dockerfile.server \
       --build-arg USER_UID="$(id -u)" \
       --build-arg USER_GID="$(id -g)" \
       -t filesend-server-dev .
-   ```
-2. Run server from `examples/` directory (so we do not copy the files present in `examples/` to the current directory once again):
+```
+
+2. Run server from `server/` directory (so we do not copy the files present in `server/` to the current directory once again):
 
    ```bash
    docker run --rm -it \
@@ -453,7 +464,9 @@ Verifies file's SHA-256 (both raw and hex formats). Can be used on server side.
 filesend keygen [--symmetric|--asymmetric]
 ```
 
-Creates a key/keypair suitable for encryption/decryption.
+Creates a key/keypair suitable for encryption/decryption. 
+
+You do not need anything to run it (for example, sourcing `.env` or setting the `filesend_config`). The warnings about using default fields (e.g. `[WARN] No KEY_PATH found in environment. Using default: my_key.bin`) can be safely ignored.
 
 **NOTE:** `keygen` is possible only from CLI, config-based method does not support it.
 
