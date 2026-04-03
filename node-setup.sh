@@ -78,7 +78,7 @@ EOF
 MODE=""
 CONFIG_FILE="setup.json"
 
-if [[ $# -ne 1 ]]; then usage; exit 1; fi
+if [[ $# -lt 1 || $# -gt 2 ]]; then usage; exit 1; fi
 
 case "$1" in
   --one|--multiple) MODE="$1" ;;
@@ -160,6 +160,60 @@ for dev in data.get("devices", []):
 PY
 }
 
+normalize_connection_mode() {
+  local mode
+  mode="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$mode" in
+    http|https) printf '%s\n' "http" ;;
+    ws|wss)     printf '%s\n' "ws" ;;
+    "")         printf '%s\n' "ws" ;;
+    *) die "Unsupported server_connection.mode: $1 (expected http, https, ws, or wss)." ;;
+  esac
+}
+
+extract_host_from_url() {
+  local raw="${1:-}"
+  python3 - "$raw" <<'PY'
+import sys
+from urllib.parse import urlsplit
+
+raw = (sys.argv[1] or "").strip()
+
+if not raw:
+    print("0.0.0.0")
+    raise SystemExit(0)
+
+if "://" not in raw:
+    raw = "dummy://" + raw
+
+u = urlsplit(raw)
+
+if u.hostname:
+    print(u.hostname)
+else:
+    raise SystemExit(f"Could not extract host from server_connection.url: {sys.argv[1]}")
+PY
+}
+
+resolve_filesend_url() {
+  local normalized_mode="$1"
+  local raw_url="$2"
+  local host
+
+  host="$(extract_host_from_url "$raw_url")"
+
+  # Re-add brackets for IPv6 literals
+  if [[ "$host" == *:* && "$host" != \[*\] ]]; then
+    host="[$host]"
+  fi
+
+  case "$normalized_mode" in
+    ws)   printf '%s\n' "wss://${host}:8444" ;;
+    http) printf '%s\n' "https://${host}:8443/upload" ;;
+    *) die "Cannot resolve filesend_config url for mode: $normalized_mode" ;;
+  esac
+}
+
 # Read config
 REPO_ROOT="$(json_get_string "repo_root")"
 [[ -n "$REPO_ROOT" ]] || REPO_ROOT="."
@@ -178,25 +232,28 @@ APP_WORKSPACE_DIR="$(json_get_nested_string "app" "workspace_dir")"
 APP_NETWORK="$(json_get_nested_string "app" "network")"
 
 CONN_MODE="$(json_get_nested_string "server_connection" "mode")"
-CONN_URL="$(json_get_nested_string "server_connection" "url")"
+CONN_URL_RAW="$(json_get_nested_string "server_connection" "url")"
 
 mapfile -t DEVICES < <(json_get_devices)
 
+# Server
 [[ -n "$SERVER_DOCKERFILE" ]] || SERVER_DOCKERFILE="Dockerfile.server"
 [[ -n "$SERVER_IMAGE" ]]      || SERVER_IMAGE="filesend-server-dev"
 [[ -n "$SERVER_CONTAINER_NAME" ]] || SERVER_CONTAINER_NAME="filesend-server-dev"
 [[ -n "$SERVER_WORKSPACE_DIR" ]]  || SERVER_WORKSPACE_DIR="server"
 [[ -n "$SERVER_PORT_MAP" ]] || SERVER_PORT_MAP="8444:8444"
-[[ -n "$SERVER_MODE_ENV" ]] || SERVER_MODE_ENV="${CONN_MODE:-ws}"
 
+# App
 [[ -n "$APP_DOCKERFILE" ]] || APP_DOCKERFILE="Dockerfile.sender"
 [[ -n "$APP_IMAGE" ]]      || APP_IMAGE="filesend-app"
 [[ -n "$APP_CONTAINER_NAME" ]] || APP_CONTAINER_NAME="filesend-app"
 [[ -n "$APP_WORKSPACE_DIR" ]]  || APP_WORKSPACE_DIR="."
 [[ -n "$APP_NETWORK" ]] || APP_NETWORK="host"
 
-[[ -n "$CONN_MODE" ]] || CONN_MODE="ws"
-[[ -n "$CONN_URL" ]]  || CONN_URL="127.0.0.1:8444"
+CONN_MODE="$(normalize_connection_mode "${CONN_MODE:-ws}")"
+[[ -n "$SERVER_MODE_ENV" ]] || SERVER_MODE_ENV="$CONN_MODE"
+
+CONN_URL="$(resolve_filesend_url "$CONN_MODE" "${CONN_URL_RAW:-0.0.0.0}")"
 
 [[ ${#DEVICES[@]} -gt 0 ]] || die "No devices found in config.json under \"devices\"."
 
@@ -470,7 +527,12 @@ prepare_device_dir() {
     set_config_value "$device_dir/filesend_config" "sym_key_path" "$LATEST_PR_BASENAME"
   fi
 
-  set_config_value "$device_dir/filesend_config" "mode" "$CONN_MODE"
+  if [[ "$CONN_MODE" == "ws" || "$CONN_MODE" == "wss" ]]; then
+    set_config_value "$device_dir/filesend_config" "use_ws" "true"
+  else
+     set_config_value "$device_dir/filesend_config" "use_ws" "false"
+  fi
+  
   set_config_value "$device_dir/filesend_config" "url" "$CONN_URL"
 
   set_config_value "$device_dir/filesend_config" "device_id" "$device_id"

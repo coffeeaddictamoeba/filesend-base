@@ -41,6 +41,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set the working directory
 WORKDIR /workspace
 
+# Build the app
+COPY . /workspace
+RUN make
+COPY bin/filesend /usr/local/bin/filesend
+RUN chmod +x /usr/local/bin/filesend
+
 # Default user settings via build args
 ARG USER_ID=1000
 ARG GROUP_ID=1000

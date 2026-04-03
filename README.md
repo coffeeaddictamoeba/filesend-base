@@ -99,7 +99,7 @@ chmod +x node-setup.sh       # allow execution
    ```
 6. Both of the sides (server and sender) have their logs which explicitly show if sending succeeded or not, and if not then what was the reason.
 
-#### Common Problems
+#### Common Issues
 
 ---
 
@@ -128,6 +128,11 @@ chmod +x node-setup.sh       # allow execution
      * Check if `devtokens.json` exists and has a correct device token.
      * Check if sender's config `filesend_config` has `device_id` set to to device token.
    * **Fix:** if error persists, try setting `require_auth` in `server_config` to `false` or generate new device token and update the necessary files.
+4. On sender: `load_verify_file: No such file or directory`
+
+   - Sender logs: `terminate called after throwing an instance of '...' what():  load_verify_file: No such file or directory`
+   - This problem occurs when app cannot resolve a path from `filesend_config`.
+     - Check if all paths inside `filesend_config` are valid and exist
 
 ### Compile-Time Options
 
@@ -464,7 +469,7 @@ Verifies file's SHA-256 (both raw and hex formats). Can be used on server side.
 filesend keygen [--symmetric|--asymmetric]
 ```
 
-Creates a key/keypair suitable for encryption/decryption. 
+Creates a key/keypair suitable for encryption/decryption.
 
 You do not need anything to run it (for example, sourcing `.env` or setting the `filesend_config`). The warnings about using default fields (e.g. `[WARN] No KEY_PATH found in environment. Using default: my_key.bin`) can be safely ignored.
 
