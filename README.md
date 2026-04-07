@@ -192,7 +192,7 @@ These dependencies are required to run server (pip):
 ---
 
 ```
-filesend send    [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--all] [--timeout <n>] [--retry <n>] [--no-retry] [--batch <n>] [--archive] [--nthreads <n>]
+filesend send    [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--all] [--timeout <n>] [--retry <n>] [--no-retry] [--batch <n>] [--archive] [--nthreads <n>] [--poll-interval <n>]
 filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--force] [--archive]
 filesend decrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>] [--force] [--archive]
 filesend verify  <path> <sha256>
@@ -249,6 +249,7 @@ use_ws = true                            # flag for websocket use; for HTTP/HTTP
 
 timeout = 5                              # if there are no more new files in directory, the app will stop; measured in seconds
 retry = 3                                # amount of retries in case of unsuccessful connection; does NOT retry failed file processing
+poll_interval = 1000                     # poll interval for incoming directory; measured in milliseconds
 nthreads = 3                             # number of sending threads
 batch_size = 1                           # amount of files inside a batch archive; if set to 1, no batching is applied
 batch_format = zip                       # format of batch archive; can be .zip, .tar or .tar.gz

@@ -253,13 +253,13 @@ bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::second
     }
 
     const auto policy = sender_.get_policy();
+
     const TempDirsConfig dc(inbox);
     init_workdirs(0, dc, nullptr); // init only essential dirs
 
     std::unordered_set<std::string> processed;
 
     auto last_new = std::chrono::steady_clock::now();
-    const auto poll_interval = std::chrono::seconds(1);
 
     while (true) {
         bool new_in_this_round = false;
@@ -293,8 +293,9 @@ bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::second
             last_new = std::chrono::steady_clock::now();
         }
 
+        // Negative timeout means continuous polling
         if (timeout.count() <= 0) {
-            std::this_thread::sleep_for(poll_interval);
+            std::this_thread::sleep_for(policy.poll_interval);
             continue;
         }
 
@@ -306,7 +307,10 @@ bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::second
                 if (batch_ && batch_->qsize() > 0) {
                     printf(
                         YELLOW "[INFO] Timeout reached (%lld seconds), sending last batch: %d (queue size: %zu/%zu).\n" RESET, 
-                        (long long)timeout.count(), batch_->get_id(), batch_->qsize(), batch_->size
+                        (long long)timeout.count(), 
+                        batch_->get_id(), 
+                        batch_->qsize(), 
+                        batch_->size
                     );
 
                     batch_->ready = true;
@@ -316,7 +320,9 @@ bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::second
                         fprintf(
                             stderr,
                             RED "[ERROR] Warning: failed to process last batch %d (queue size: %zu/%zu)\n" RESET, 
-                            batch_->get_id(), batch_->qsize(), batch_->size
+                            batch_->get_id(), 
+                            batch_->qsize(), 
+                            batch_->size
                         );
                     }
 
@@ -337,7 +343,7 @@ bool FileSender::send_files_from_path(const fs::path& inbox, std::chrono::second
             }
         }
 
-        std::this_thread::sleep_for(poll_interval);
+        std::this_thread::sleep_for(policy.poll_interval);
     }
 
     sender_.send_end();

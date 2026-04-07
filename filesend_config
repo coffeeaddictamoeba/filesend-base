@@ -17,8 +17,10 @@ url = wss://0.0.0.0:8444
 use_ws = true
 
 # negative timeout means watching mode (never stops)
+# timeout is in seconds
 timeout = -1
 retry = 5
+poll_interval = 1000     # poll_interval is in milliseconds
 nthreads = 3
 batch_size = 1
 batch_format = zip

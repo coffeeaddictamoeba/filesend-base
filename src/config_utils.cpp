@@ -1,8 +1,12 @@
+#include <cstdio>
+#include <string>
 #include <string_view>
 #include <unistd.h>
 
 #include "../include/helpers.h"
 #include "../include/config_utils.h"
+
+constexpr char COMMENT_SYMBOL = '#';
 
 static inline bool parse_bool(std::string_view v, bool& out) {
     v = trim(v);
@@ -111,7 +115,10 @@ void GlobalFilesendConfig::set(std::string_view section, std::string_view key, s
         if      (key == "use_ws")  { bool b; if (parse_bool(val,b)) cfg.use_ws = b; }
         else if (key == "url")     { cfg.policy.url.assign(val.data(), val.size()); }
         else if (key == "timeout") { int s; if (parse_int(val,s)) cfg.policy.timeout = std::chrono::seconds(std::max(0,s)); }
-        else if (key == "retry")   { 
+        else if (key == "poll_interval") { 
+            int s; 
+            if (parse_int(val,s)) cfg.policy.poll_interval = std::chrono::milliseconds(std::max(0,s)); 
+        } else if (key == "retry")   { 
             int n;
             if (parse_int(val,n)) {
                 cfg.policy.retry_send.max_attempts = 
@@ -199,7 +206,7 @@ FilesendConfig GlobalFilesendConfig::load() {
 
         line = trim(line);
         if (line.empty()) continue;
-        if (line.front()=='#' || line.front()==';') continue;
+        if (line.front()==COMMENT_SYMBOL || line.front()==';') continue;
 
         if (line.front()=='[' && line.back()==']') {
             section = trim(line.substr(1, line.size()-2));
@@ -209,8 +216,9 @@ FilesendConfig GlobalFilesendConfig::load() {
         size_t eq = line.find('=');
         if (eq == std::string_view::npos) continue;
 
-        std::string_view key = trim(line.substr(0, eq));
-        std::string_view val = trim(line.substr(eq+1));
+        std::string_view line_without_comment = line.substr(0, line.find_first_of(COMMENT_SYMBOL));
+        std::string_view key = trim(line_without_comment.substr(0, eq));
+        std::string_view val = trim(line_without_comment.substr(eq+1));
         if (key.empty()) continue;
 
         this->set(section, key, val);

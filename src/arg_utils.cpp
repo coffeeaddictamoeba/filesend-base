@@ -29,7 +29,8 @@ void ArgParser::usage(const char* prog) const {
         "  %s send  [--https|--ws]  <path> <url> "
         "[--encrypt symmetric|asymmetric] [--all] "
         "[--timeout <n>] [--retry <n>] [--no-retry] "
-        "[--batch <n> <format>] [--archive] [--nthreads <n>]\n" 
+        "[--batch <n> <format>] [--archive] [--nthreads <n>]"
+        "[--poll-interval <n>]\n" 
 
         "  %s encrypt <path> [--symmetric|--asymmetric] [--all] "
         "[--dest <file>] [--force] [--archive]\n"
@@ -259,6 +260,22 @@ void ArgParser::handle_send_retry(int& value, int argc, char** argv) {
     = std::abs(std::atoi(argv[++value]));
 }
 
+void ArgParser::handle_poll_interval(int& value, int argc, char** argv) {
+    if (value + 1 >= argc) {
+        fprintf(
+            stderr,
+            RED "[ERROR] --poll-interval requires integer count\n" RESET
+        );
+        return;
+    }
+
+    config_.policy.poll_interval = std::chrono::milliseconds(
+        std::abs(
+            std::atoi(argv[++value])
+        )
+    );
+}
+
 void ArgParser::handle_send(int argc, char** argv) {
     if (argc < 5 || (strcmp(argv[2], "--https") != 0 && strcmp(argv[2], "--ws") != 0)) {
         fprintf(
@@ -284,14 +301,15 @@ void ArgParser::handle_send(int argc, char** argv) {
 
     for (int i = 5; i < argc; ++i) {
         const char* arg = argv[i];
-        if      (strcmp(arg, "--encrypt") == 0)  { handle_send_encrypt(i, argc, argv); } 
-        else if (strcmp(arg, "--all") == 0)      { config_.policy.enc_p.flags |= ENC_FLAG_ALL; } 
-        else if (strcmp(arg, "--archive") == 0)  { config_.policy.enc_p.flags |= ENC_FLAG_ARCHIVE; } 
-        else if (strcmp(arg, "--batch") == 0)    { handle_send_batch(i, argc, argv); }
-        else if (strcmp(arg, "--timeout") == 0)  { handle_mode_timeout(i, argc, argv); }
-        else if (strcmp(arg, "--retry") == 0)    { handle_send_retry(i, argc, argv); }
-        else if (strcmp(arg, "--no-retry") == 0) { config_.policy.retry_send.max_attempts = config_.policy.retry_connect.max_attempts = 1; } // separate?
-        else if (strcmp(arg, "--nthreads") == 0) { handle_mode_threads(i, argc, argv); }
+        if      (strcmp(arg, "--encrypt") == 0)       { handle_send_encrypt(i, argc, argv); } 
+        else if (strcmp(arg, "--all") == 0)           { config_.policy.enc_p.flags |= ENC_FLAG_ALL; } 
+        else if (strcmp(arg, "--archive") == 0)       { config_.policy.enc_p.flags |= ENC_FLAG_ARCHIVE; } 
+        else if (strcmp(arg, "--batch") == 0)         { handle_send_batch(i, argc, argv); }
+        else if (strcmp(arg, "--poll-interval") == 0) { handle_poll_interval(i, argc, argv); }
+        else if (strcmp(arg, "--timeout") == 0)       { handle_mode_timeout(i, argc, argv); }
+        else if (strcmp(arg, "--retry") == 0)         { handle_send_retry(i, argc, argv); }
+        else if (strcmp(arg, "--no-retry") == 0)      { config_.policy.retry_send.max_attempts = config_.policy.retry_connect.max_attempts = 1; } // separate?
+        else if (strcmp(arg, "--nthreads") == 0)      { handle_mode_threads(i, argc, argv); }
         else {
             fprintf(
                 stderr,

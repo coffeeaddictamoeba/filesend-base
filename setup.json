@@ -19,7 +19,7 @@
   },
   "server_connection": {
     "mode": "ws",
-    "url": "127.0.0.1:8444"
+    "url": "0.0.0.0:8444"
   },
   "devices": [
     { "id": "device_1" },

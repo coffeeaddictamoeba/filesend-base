@@ -46,6 +46,7 @@ struct FilesendPolicy {
     RetryPolicy retry_send;
     RetryPolicy retry_connect;
     std::chrono::seconds timeout;
+    std::chrono::milliseconds poll_interval;
 
     bool is_encryption_needed()       const noexcept { return enc_p.flags & ENC_FLAG_ENABLED; }
     bool is_encryption_symmetric()    const noexcept { return enc_p.flags & ENC_FLAG_SYMMETRIC; }
