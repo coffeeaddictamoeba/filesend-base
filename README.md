@@ -22,9 +22,9 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 - Program is compiled with `FILESEND_PROFILE_FULL` and server is compiled with `FILESEND_PROFILE_MINIMAL_WS`
 - When running a server with **Docker**, all the necessary security material (server key, server certificate, encryption keys) is generated and `server_config` is updated **automatically **
 - When running a server with **Docker**, server starts **automatically**
-- Sender's `filesend_config` needs **manual update** to match server's security material (server's CA certificate and encryption keys), as **default configs use test key locations**. More secure setup needs specialized protected key locations with limited permissions.
 - Sender's `filesend` and server are expected to be **different devices** on the **same network** (but you still can run both as separate processes on one machine for testing purposes)
 - `--retry <n>` option in `filesend` (same as `retry` field in `filesend_config` ) will retry **only in case of connection failure** but NOT in case of failed file processing
+- For the fast setup, defaults are **WebSocket connection**, **TLS via CA certificate** and **asymmetric cryptosystem** for file contents encryption
 
 #### Default Configuration Setup
 
@@ -32,13 +32,22 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 
 ##### **Fast setup using `node-setup.sh`**
 
+For the fast setup everything you need is the repo itself and Docker installed.
+
 ```bash
-chmod +x node-setup.sh       # allow execution
+chmod +x node-setup.sh generate-configs.sh  # allow execution
 ./node-setup.sh --one        # run for testing on single device (creates server + app containers, leaves in app container's shell)
 ./node-setup.sh --multiple   # run for starting the server and generating all the necessary device configuration inside crypto/asymm/devices (or crypto/symm/devices)
 ```
 
+- Running with option `--one` will assume you have only one node for both sender and server so the code execution will leave you in a sender's shell so you can select a directory an run the testing on it via `filesend send my_dir/` This option is for fast one-device testing
+- Running with option `--multiple` will start the server and prepare the security material for nodes just as a command above but it will not create an app container as it is assumed the app container will run on one or multiple nodes (sender devices) which are different from the server device
+
+If you want to review or modify the default fast setup, check the `setup.json` file.
+
 ##### Manual Setup
+
+Fast setup automates all the steps below but for more control over the setup process you can follow the manual setup steps:
 
 1. Build **server** container from the repo root `filesend-base/`:
 

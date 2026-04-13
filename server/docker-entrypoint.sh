@@ -31,6 +31,22 @@ ensure_dir() {
   [[ -d "$dir" ]] || mkdir -p "$dir"
 }
 
+ensure_env_file() {
+  local env_file="${1:-.env}"
+
+  if [[ -f "${env_file}" ]]; then
+    return 0
+  fi
+
+  if [[ -f "server/.env" ]]; then
+    cp "server/.env" "${env_file}"
+    echo "Copied server/.env -> ${env_file}"
+  else
+    : > "${env_file}"
+    echo "Created empty ${env_file}"
+  fi
+}
+
 prepare_temp_input() {
   local file="$1"
   printf 'bootstrap-%s\n' "${DATE_TAG}" > "${file}"
@@ -436,6 +452,8 @@ update_server_config_security() {
 update_dotenv_security() {
   local env_file="${1:-.env}"
 
+  ensure_env_file "$env_file"
+
   update_env_export "$env_file" "PUB_KEY_PATH" "${ASYM_PUBLIC_PATH_GEN}"
   update_env_export "$env_file" "SYM_KEY_PATH" "${SYM_KEY_PATH_GEN}"
   update_env_export "$env_file" "CERT_PATH" "${CA_CERT_PATH_GEN}"
@@ -463,13 +481,13 @@ bootstrap_repo() {
   fi
 
   if [[ "${SERVER_MODE}" == "https" ]]; then
-    copy_if_missing "examples/runserver_https.py" "runserver_https.py"
+    copy_if_missing "server/runserver_https.py" "runserver_https.py"
   else
-    copy_if_missing "examples/runserver_ws.py" "runserver_ws.py"
+    copy_if_missing "server/runserver_ws.py" "runserver_ws.py"
   fi
 
-  copy_if_missing "examples/.env" ".env"
-  copy_if_missing "examples/server_config" "server_config"
+  ensure_env_file ".env"
+  copy_if_missing "server/server_config" "server_config"
 
   if [[ ! -d ".venv" ]]; then
     python -m venv .venv
@@ -488,15 +506,12 @@ bootstrap_repo() {
   echo "Installed packages:"
   pip list | grep -E 'aiohttp|websockets|pip|setuptools' || true
 
-  if [[ -f ".env" ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
-    echo "Loaded .env"
-  else
-    echo "No .env found; skipped loading it"
-  fi
+  ensure_env_file ".env"
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+  echo "Loaded .env"
 }
 
 load_runtime_env() {
@@ -508,15 +523,12 @@ load_runtime_env() {
     return 1
   fi
 
-  if [[ -f ".env" ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
-    echo "Loaded .env"
-  else
-    echo "No .env found"
-  fi
+  ensure_env_file ".env"
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+  echo "Loaded .env"
 }
 
 start_server() {

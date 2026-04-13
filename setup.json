@@ -15,7 +15,8 @@
     "image": "filesend-app",
     "container_name": "filesend-app",
     "workspace_dir": ".",
-    "network": "host"
+    "network": "host",
+    "encrypt": "asymm"
   },
   "server_connection": {
     "mode": "ws",

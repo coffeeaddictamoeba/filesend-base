@@ -55,3 +55,7 @@ decrypted/
 incoming/
 
 *.sqlite3
+
+/filesend_config
+/server/server_config
+/server/.env

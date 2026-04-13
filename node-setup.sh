@@ -25,7 +25,8 @@ set -Eeuo pipefail
 #     "image": "filesend-app",
 #     "container_name": "filesend-app",
 #     "workspace_dir": ".",
-#     "network": "host"
+#     "network": "host",
+#     "encrypt": "asymm" // or "symm"/"no"
 #   },
 #   "server_connection": {
 #     "mode": "ws",
@@ -85,14 +86,14 @@ case "$1" in
   *) usage; die "Unknown mode: $1" ;;
 esac
 
-if [[ $# -eq 2 ]]; then 
+if [[ $# -eq 2 ]]; then
   CONFIG_FILE="$2"
 fi
 
 [[ -f "$CONFIG_FILE" ]] || die "Config file not found: $CONFIG_FILE"
 
-require_cmd() { 
-  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1" 
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
 require_cmd docker
@@ -104,9 +105,9 @@ require_cmd find
 require_cmd cp
 require_cmd mkdir
 require_cmd date
+require_cmd chmod
 
 # Minimal JSON helpers
-# Minimal JSON helpers (using python stdlib, no jq dependency)
 json_get_string() {
   local key="$1"
   python3 - "$CONFIG_FILE" "$key" <<'PY'
@@ -171,6 +172,17 @@ normalize_connection_mode() {
   esac
 }
 
+normalize_encrypt_mode() {
+  local mode
+  mode="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$mode" in
+    asymm|asymmetric|"") printf '%s\n' "asymm" ;;
+    symm|symmetric)      printf '%s\n' "symm" ;;
+    no|none|off)         printf '%s\n' "no" ;;
+    *) die "Unsupported app.encrypt: $1 (expected asymm, symm, or no)." ;;
+  esac
+}
+
 extract_host_from_url() {
   local raw="${1:-}"
   python3 - "$raw" <<'PY'
@@ -183,10 +195,11 @@ if not raw:
     print("0.0.0.0")
     raise SystemExit(0)
 
-if "://" not in raw:
-    raw = "dummy://" + raw
+candidate = raw
+if "://" not in candidate:
+    candidate = "dummy://" + raw
 
-u = urlsplit(raw)
+u = urlsplit(candidate)
 
 if u.hostname:
     print(u.hostname)
@@ -195,26 +208,97 @@ else:
 PY
 }
 
+extract_port_from_url() {
+  local raw="${1:-}"
+  local normalized_mode="${2:-ws}"
+
+  python3 - "$raw" "$normalized_mode" <<'PY'
+import sys
+from urllib.parse import urlsplit
+
+raw = (sys.argv[1] or "").strip()
+mode = (sys.argv[2] or "ws").strip().lower()
+
+default_port = 8444 if mode == "ws" else 8443
+
+if not raw:
+    print(default_port)
+    raise SystemExit(0)
+
+candidate = raw
+if "://" not in candidate:
+    candidate = "dummy://" + raw
+
+u = urlsplit(candidate)
+
+if u.port is not None:
+    print(u.port)
+else:
+    print(default_port)
+PY
+}
+
 resolve_filesend_url() {
   local normalized_mode="$1"
   local raw_url="$2"
   local host
+  local port
 
   host="$(extract_host_from_url "$raw_url")"
+  port="$(extract_port_from_url "$raw_url" "$normalized_mode")"
 
-  # Re-add brackets for IPv6 literals
   if [[ "$host" == *:* && "$host" != \[*\] ]]; then
     host="[$host]"
   fi
 
   case "$normalized_mode" in
-    ws)   printf '%s\n' "wss://${host}:8444" ;;
-    http) printf '%s\n' "https://${host}:8443/upload" ;;
+    ws)   printf '%s\n' "wss://${host}:${port}" ;;
+    http) printf '%s\n' "https://${host}:${port}/upload" ;;
     *) die "Cannot resolve filesend_config url for mode: $normalized_mode" ;;
   esac
 }
 
-# Read config
+set_config_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+
+  [[ -f "$file" ]] || die "Config file not found: $file"
+
+  if grep -Eq "^[[:space:]]*${key}[[:space:]]*[:=]" "$file"; then
+    sed -i -E "s|^([[:space:]]*${key}[[:space:]]*[:=][[:space:]]*).*$|\1${value}|" "$file"
+  else
+    printf '\n%s = %s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+remove_config_key() {
+  local file="$1"
+  local key="$2"
+  [[ -f "$file" ]] || die "Config file not found: $file"
+  sed -i -E "/^[[:space:]]*${key}[[:space:]]*[:=].*$/d" "$file"
+}
+
+rename_ini_section() {
+  local file="$1"
+  local old_section="$2"
+  local new_section="$3"
+  [[ -f "$file" ]] || die "Config file not found: $file"
+  sed -i -E "s|^[[:space:]]*\[${old_section}\][[:space:]]*$|[${new_section}]|" "$file"
+}
+
+ensure_ini_section_name() {
+  local file="$1"
+  local target_section="$2"
+  [[ -f "$file" ]] || die "Config file not found: $file"
+
+  if grep -Eq "^[[:space:]]*\[inactive\][[:space:]]*$" "$file"; then
+    sed -i -E "s|^[[:space:]]*\[inactive\][[:space:]]*$|[${target_section}]|" "$file"
+  elif grep -Eq "^[[:space:]]*\[removed\][[:space:]]*$" "$file"; then
+    sed -i -E "s|^[[:space:]]*\[removed\][[:space:]]*$|[${target_section}]|" "$file"
+  fi
+}
+
 REPO_ROOT="$(json_get_string "repo_root")"
 [[ -n "$REPO_ROOT" ]] || REPO_ROOT="."
 
@@ -230,32 +314,60 @@ APP_IMAGE="$(json_get_nested_string "app" "image")"
 APP_CONTAINER_NAME="$(json_get_nested_string "app" "container_name")"
 APP_WORKSPACE_DIR="$(json_get_nested_string "app" "workspace_dir")"
 APP_NETWORK="$(json_get_nested_string "app" "network")"
+APP_ENCRYPT_RAW="$(json_get_nested_string "app" "encrypt")"
 
 CONN_MODE="$(json_get_nested_string "server_connection" "mode")"
 CONN_URL_RAW="$(json_get_nested_string "server_connection" "url")"
 
 mapfile -t DEVICES < <(json_get_devices)
 
-# Server
 [[ -n "$SERVER_DOCKERFILE" ]] || SERVER_DOCKERFILE="Dockerfile.server"
-[[ -n "$SERVER_IMAGE" ]]      || SERVER_IMAGE="filesend-server-dev"
+[[ -n "$SERVER_IMAGE" ]] || SERVER_IMAGE="filesend-server-dev"
 [[ -n "$SERVER_CONTAINER_NAME" ]] || SERVER_CONTAINER_NAME="filesend-server-dev"
-[[ -n "$SERVER_WORKSPACE_DIR" ]]  || SERVER_WORKSPACE_DIR="server"
-[[ -n "$SERVER_PORT_MAP" ]] || SERVER_PORT_MAP="8444:8444"
+[[ -n "$SERVER_WORKSPACE_DIR" ]] || SERVER_WORKSPACE_DIR="server"
 
-# App
 [[ -n "$APP_DOCKERFILE" ]] || APP_DOCKERFILE="Dockerfile.sender"
-[[ -n "$APP_IMAGE" ]]      || APP_IMAGE="filesend-app"
+[[ -n "$APP_IMAGE" ]] || APP_IMAGE="filesend-app"
 [[ -n "$APP_CONTAINER_NAME" ]] || APP_CONTAINER_NAME="filesend-app"
-[[ -n "$APP_WORKSPACE_DIR" ]]  || APP_WORKSPACE_DIR="."
+[[ -n "$APP_WORKSPACE_DIR" ]] || APP_WORKSPACE_DIR="."
 [[ -n "$APP_NETWORK" ]] || APP_NETWORK="host"
 
 CONN_MODE="$(normalize_connection_mode "${CONN_MODE:-ws}")"
 [[ -n "$SERVER_MODE_ENV" ]] || SERVER_MODE_ENV="$CONN_MODE"
 
+ENCRYPT_MODE="$(normalize_encrypt_mode "${APP_ENCRYPT_RAW:-asymm}")"
+
+SERVER_HOST="$(extract_host_from_url "${CONN_URL_RAW:-0.0.0.0}")"
+SERVER_PORT="$(extract_port_from_url "${CONN_URL_RAW:-0.0.0.0}" "$CONN_MODE")"
 CONN_URL="$(resolve_filesend_url "$CONN_MODE" "${CONN_URL_RAW:-0.0.0.0}")"
 
-[[ ${#DEVICES[@]} -gt 0 ]] || die "No devices found in config.json under \"devices\"."
+[[ -n "$SERVER_PORT_MAP" ]] || SERVER_PORT_MAP="${SERVER_PORT}:${SERVER_PORT}"
+
+[[ ${#DEVICES[@]} -gt 0 ]] || die 'No devices found in config.json under "devices".'
+
+REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
+SERVER_WORKSPACE_ABS="$(cd "$REPO_ROOT/$SERVER_WORKSPACE_DIR" && pwd)"
+APP_WORKSPACE_ABS="$(cd "$REPO_ROOT/$APP_WORKSPACE_DIR" && pwd)"
+
+GENERATE_CONFIGS_SCRIPT="$REPO_ROOT/generate-configs.sh"
+ROOT_FILESEND_CONFIG="$REPO_ROOT/filesend_config"
+SERVER_CONFIG_PATH="$REPO_ROOT/server/server_config"
+
+CRYPTO_ROOT="$REPO_ROOT/crypto"
+ASYMM_ROOT="$CRYPTO_ROOT/asymm"
+SYMM_ROOT="$CRYPTO_ROOT/symm"
+SERVER_CRYPTO_DIR="$ASYMM_ROOT/server"
+DEVICES_ROOT="$ASYMM_ROOT/devices"
+CA_DIR="$ASYMM_ROOT/CA"
+
+mkdir -p "$SERVER_CRYPTO_DIR" "$DEVICES_ROOT" "$CA_DIR" "$SYMM_ROOT"
+
+LATEST_CA_BASENAME=""
+LATEST_PUB_BASENAME=""
+LATEST_SYM_BASENAME=""
+LATEST_PR_BASENAME=""
+LATEST_SERVER_CERT_BASENAME=""
+LATEST_SERVER_KEY_BASENAME=""
 
 log "Resolved config:"
 log "  REPO_ROOT=$REPO_ROOT"
@@ -270,40 +382,32 @@ log "  APP_IMAGE=$APP_IMAGE"
 log "  APP_CONTAINER_NAME=$APP_CONTAINER_NAME"
 log "  APP_WORKSPACE_DIR=$APP_WORKSPACE_DIR"
 log "  APP_NETWORK=$APP_NETWORK"
+log "  ENCRYPT_MODE=$ENCRYPT_MODE"
 log "  CONN_MODE=$CONN_MODE"
+log "  SERVER_HOST=$SERVER_HOST"
+log "  SERVER_PORT=$SERVER_PORT"
 log "  CONN_URL=$CONN_URL"
+log "  ROOT_FILESEND_CONFIG=$ROOT_FILESEND_CONFIG"
+log "  SERVER_CONFIG_PATH=$SERVER_CONFIG_PATH"
 log "  DEVICES_COUNT=${#DEVICES[@]}"
 for d in "${DEVICES[@]}"; do
   log "  DEVICE=$d"
 done
 
-REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
-SERVER_WORKSPACE_ABS="$(cd "$REPO_ROOT/$SERVER_WORKSPACE_DIR" && pwd)"
-APP_WORKSPACE_ABS="$(cd "$REPO_ROOT/$APP_WORKSPACE_DIR" && pwd)"
+generate_base_configs() {
+  [[ -f "$GENERATE_CONFIGS_SCRIPT" ]] || die "generate-configs.sh not found: $GENERATE_CONFIGS_SCRIPT"
 
-TEMPLATE_CONFIG="$REPO_ROOT/filesend_config"
-[[ -f "$TEMPLATE_CONFIG" ]] || die "Template filesend_config was not found in repo root: $TEMPLATE_CONFIG"
+  log "Generating base configs via generate-configs.sh"
+  (
+    cd "$REPO_ROOT"
+    chmod +x "$GENERATE_CONFIGS_SCRIPT"
+    "$GENERATE_CONFIGS_SCRIPT"
+  )
 
-# ./
-# └── crypto/
-#     ├── asymm/
-#     │   ├── CA/
-#     │   ├── devices/
-#     │   │   ├── <device_id_1>/
-#     │   │   ├── <device_id_2>/
-#     │   │   └── <device_id_N>/
-#     │   └── server/
-#     └── symm/
-CRYPTO_ROOT="$REPO_ROOT/crypto"
-ASYMM_ROOT="$CRYPTO_ROOT/asymm"
-SYMM_ROOT="$CRYPTO_ROOT/symm"
-SERVER_CRYPTO_DIR="$ASYMM_ROOT/server"
-DEVICES_ROOT="$ASYMM_ROOT/devices"
-CA_DIR="$ASYMM_ROOT/CA"
+  [[ -f "$ROOT_FILESEND_CONFIG" ]] || die "Generated root filesend_config not found: $ROOT_FILESEND_CONFIG"
+  [[ -f "$SERVER_CONFIG_PATH" ]] || die "Generated server/server_config not found: $SERVER_CONFIG_PATH"
+}
 
-mkdir -p "$SERVER_CRYPTO_DIR" "$DEVICES_ROOT" "$CA_DIR" "$SYMM_ROOT"
-
-# Docker helpers
 container_exists() {
   local name="$1"
   docker ps -a --format '{{.Names}}' | grep -Fxq "$name"
@@ -337,13 +441,12 @@ build_server_image() {
 
 run_server_detached() {
   remove_container_if_exists "$SERVER_CONTAINER_NAME"
+
   log "Starting server container in detached mode: $SERVER_CONTAINER_NAME"
   log "  image:      $SERVER_IMAGE"
   log "  port map:   $SERVER_PORT_MAP"
   log "  workspace:  $SERVER_WORKSPACE_ABS:/workspace"
   log "  mode env:   SERVER_MODE=$SERVER_MODE_ENV"
-
-  cd "$REPO_ROOT/server/"
 
   local container_id
   container_id="$(
@@ -399,7 +502,6 @@ run_app_interactive() {
     "$APP_IMAGE"
 }
 
-# Security material handling
 find_latest_in_server_container() {
   local pattern="$1"
   docker exec "$SERVER_CONTAINER_NAME" sh -lc "
@@ -422,120 +524,215 @@ copy_from_server_container_if_found() {
   return 1
 }
 
-set_config_value() {
-  local file="$1"
-  local key="$2"
-  local value="$3"
-
-  if grep -Eq "^[[:space:]]*${key}[[:space:]]*[:=]" "$file"; then
-    sed -i -E "s|^([[:space:]]*${key}[[:space:]]*[:=][[:space:]]*).*$|\1${value}|" "$file"
-  elif grep -Eq "^[[:space:]]*${key}[[:space:]]*$" "$file"; then
-    sed -i -E "s|^([[:space:]]*${key}[[:space:]]*)$|\1 ${value}|" "$file"
-  else
-    printf '%s = %s\n' "$key" "$value" >> "$file"
-  fi
-}
-
 prepare_server_material() {
   log "Collecting security material from server container."
 
-  local ca_cert="" pub_key="" sym_key="" pr_key="" server_cfg=""
+  local ca_cert="" pub_key="" sym_key="" pr_key="" server_cert="" server_key=""
 
   ca_cert="$(find_latest_in_server_container 'ca_cert-*.pem' || true)"
   pub_key="$(find_latest_in_server_container 'pub*.bin' || true)"
   sym_key="$(find_latest_in_server_container 'sym*.bin' || true)"
-  server_cfg="$(find_latest_in_server_container 'server_config' || true)"
+  pr_key="$(find_latest_in_server_container 'pr*.bin' || true)"
+  server_cert="$(find_latest_in_server_container 'server-*.crt' || true)"
+  server_key="$(find_latest_in_server_container 'server-*.key' || true)"
 
   log "Resolved server material paths:"
-  log "  ca_cert   = ${ca_cert:-<not found>}"
-  log "  pub_key   = ${pub_key:-<not found>}"
-  log "  sym_key   = ${sym_key:-<not found>}"
-  log "  server_cfg= ${server_cfg:-<not found>}"
+  log "  ca_cert    = ${ca_cert:-<not found>}"
+  log "  pub_key    = ${pub_key:-<not found>}"
+  log "  sym_key    = ${sym_key:-<not found>}"
+  log "  pr_key     = ${pr_key:-<not found>}"
+  log "  server_cert= ${server_cert:-<not found>}"
+  log "  server_key = ${server_key:-<not found>}"
 
   if [[ -n "$ca_cert" ]]; then
     copy_from_server_container_if_found "$ca_cert" "$CA_DIR/"
-    copy_from_server_container_if_found "$ca_cert" "$SERVER_CRYPTO_DIR/"
+    LATEST_CA_BASENAME="$(basename "$ca_cert")"
   else
     warn "CA certificate was not found in the server container."
   fi
 
   if [[ -n "$pub_key" ]]; then
     copy_from_server_container_if_found "$pub_key" "$SERVER_CRYPTO_DIR/"
+    LATEST_PUB_BASENAME="$(basename "$pub_key")"
   else
     warn "Public key was not found in the server container."
   fi
 
   if [[ -n "$sym_key" ]]; then
-    copy_from_server_container_if_found "$sym_key" "$SERVER_CRYPTO_DIR/"
+    copy_from_server_container_if_found "$sym_key" "$SYMM_ROOT/"
+    LATEST_SYM_BASENAME="$(basename "$sym_key")"
   else
     warn "Symmetric key was not found in the server container."
   fi
 
-  if [[ -n "$server_cfg" ]]; then
-    copy_from_server_container_if_found "$server_cfg" "$SERVER_CRYPTO_DIR/"
+  if [[ -n "$pr_key" ]]; then
+    copy_from_server_container_if_found "$pr_key" "$SERVER_CRYPTO_DIR/"
+    LATEST_PR_BASENAME="$(basename "$pr_key")"
   else
-    warn "server_config was not found in the server container."
+    warn "Private key was not found in the server container."
   fi
 
-  LATEST_CA_BASENAME=""
-  LATEST_PUB_BASENAME=""
-  LATEST_SYM_BASENAME=""
-  LATEST_PR_BASENAME=""
-
-  if [[ -n "$ca_cert" ]]; then
-    LATEST_CA_BASENAME="$(basename "$ca_cert")"
+  if [[ -n "$server_cert" ]]; then
+    copy_from_server_container_if_found "$server_cert" "$SERVER_CRYPTO_DIR/"
+    LATEST_SERVER_CERT_BASENAME="$(basename "$server_cert")"
+  else
+    warn "Server TLS certificate was not found in the server container."
   fi
 
-  if [[ -n "$pub_key" ]]; then
-    LATEST_PUB_BASENAME="$(basename "$pub_key")"
+  if [[ -n "$server_key" ]]; then
+    copy_from_server_container_if_found "$server_key" "$SERVER_CRYPTO_DIR/"
+    LATEST_SERVER_KEY_BASENAME="$(basename "$server_key")"
+  else
+    warn "Server TLS key was not found in the server container."
+  fi
+}
+
+apply_encrypt_mode_to_root_filesend_config() {
+  local cfg="$1"
+
+  case "$ENCRYPT_MODE" in
+    asymm)
+      ensure_ini_section_name "$cfg" "crypto"
+      set_config_value "$cfg" "mode" "asymmetric"
+      if [[ -n "${LATEST_PUB_BASENAME:-}" ]]; then
+        set_config_value "$cfg" "pub_key_path" "crypto/asymm/server/${LATEST_PUB_BASENAME}"
+      fi
+      if [[ -n "${LATEST_PR_BASENAME:-}" ]]; then
+        set_config_value "$cfg" "pr_key_path" "crypto/asymm/server/${LATEST_PR_BASENAME}"
+      fi
+      remove_config_key "$cfg" "sym_key_path"
+      ;;
+    symm)
+      ensure_ini_section_name "$cfg" "crypto"
+      set_config_value "$cfg" "mode" "symmetric"
+      if [[ -n "${LATEST_SYM_BASENAME:-}" ]]; then
+        set_config_value "$cfg" "sym_key_path" "crypto/symm/${LATEST_SYM_BASENAME}"
+      fi
+      remove_config_key "$cfg" "pub_key_path"
+      remove_config_key "$cfg" "pr_key_path"
+      ;;
+    no)
+      if grep -Eq '^[[:space:]]*\[crypto\][[:space:]]*$' "$cfg"; then
+        rename_ini_section "$cfg" "crypto" "inactive"
+      elif grep -Eq '^[[:space:]]*\[removed\][[:space:]]*$' "$cfg"; then
+        rename_ini_section "$cfg" "removed" "inactive"
+      fi
+      ;;
+  esac
+}
+
+update_root_filesend_config() {
+  [[ -f "$ROOT_FILESEND_CONFIG" ]] || die "Missing root filesend_config: $ROOT_FILESEND_CONFIG"
+
+  if [[ -n "${LATEST_CA_BASENAME:-}" ]]; then
+    set_config_value "$ROOT_FILESEND_CONFIG" "cert_path" "crypto/asymm/CA/${LATEST_CA_BASENAME}"
+  else
+    warn "No CA cert available for root filesend_config."
   fi
 
-  if [[ -n "$sym_key" ]]; then
-    LATEST_SYM_BASENAME="$(basename "$sym_key")"
+  apply_encrypt_mode_to_root_filesend_config "$ROOT_FILESEND_CONFIG"
+
+  if [[ "$CONN_MODE" == "ws" ]]; then
+    set_config_value "$ROOT_FILESEND_CONFIG" "use_ws" "true"
+  else
+    set_config_value "$ROOT_FILESEND_CONFIG" "use_ws" "false"
   fi
 
-  log "Collected material basenames:"
-  log "  LATEST_CA_BASENAME=${LATEST_CA_BASENAME:-<empty>}"
-  log "  LATEST_PUB_BASENAME=${LATEST_PUB_BASENAME:-<empty>}"
-  log "  LATEST_SYM_BASENAME=${LATEST_SYM_BASENAME:-<empty>}"
+  set_config_value "$ROOT_FILESEND_CONFIG" "url" "$CONN_URL"
 
-  return 0
+  log "Updated root filesend config: $ROOT_FILESEND_CONFIG"
+  log "  encrypt mode = $ENCRYPT_MODE"
+  log "  url          = $CONN_URL"
+}
+
+update_generated_server_config() {
+  [[ -f "$SERVER_CONFIG_PATH" ]] || die "Missing generated server config: $SERVER_CONFIG_PATH"
+
+  set_config_value "$SERVER_CONFIG_PATH" "host" "$SERVER_HOST"
+  set_config_value "$SERVER_CONFIG_PATH" "port" "$SERVER_PORT"
+
+  if [[ -n "${LATEST_SERVER_CERT_BASENAME:-}" ]]; then
+    set_config_value "$SERVER_CONFIG_PATH" "cert_path" "../crypto/asymm/server/${LATEST_SERVER_CERT_BASENAME}"
+  fi
+
+  if [[ -n "${LATEST_SERVER_KEY_BASENAME:-}" ]]; then
+    set_config_value "$SERVER_CONFIG_PATH" "key_path" "../crypto/asymm/server/${LATEST_SERVER_KEY_BASENAME}"
+  fi
+
+  log "Updated server config: $SERVER_CONFIG_PATH"
+  log "  host = $SERVER_HOST"
+  log "  port = $SERVER_PORT"
+}
+
+apply_encrypt_mode_to_device_config() {
+  local cfg="$1"
+  local device_id="$2"
+  local device_dir="$3"
+
+  case "$ENCRYPT_MODE" in
+    asymm)
+      ensure_ini_section_name "$cfg" "crypto"
+      set_config_value "$cfg" "mode" "asymmetric"
+
+      if [[ -n "${LATEST_PUB_BASENAME:-}" && -f "$SERVER_CRYPTO_DIR/$LATEST_PUB_BASENAME" ]]; then
+        cp "$SERVER_CRYPTO_DIR/$LATEST_PUB_BASENAME" "$device_dir/"
+        set_config_value "$cfg" "pub_key_path" "$LATEST_PUB_BASENAME"
+      else
+        warn "No public key available for device $device_id."
+      fi
+
+      remove_config_key "$cfg" "pr_key_path"
+      remove_config_key "$cfg" "sym_key_path"
+      ;;
+    symm)
+      ensure_ini_section_name "$cfg" "crypto"
+      set_config_value "$cfg" "mode" "symmetric"
+
+      if [[ -n "${LATEST_SYM_BASENAME:-}" && -f "$SYMM_ROOT/$LATEST_SYM_BASENAME" ]]; then
+        cp "$SYMM_ROOT/$LATEST_SYM_BASENAME" "$device_dir/"
+        set_config_value "$cfg" "sym_key_path" "$LATEST_SYM_BASENAME"
+      else
+        warn "No symmetric key available for device $device_id."
+      fi
+
+      remove_config_key "$cfg" "pub_key_path"
+      remove_config_key "$cfg" "pr_key_path"
+      ;;
+    no)
+      if grep -Eq '^[[:space:]]*\[crypto\][[:space:]]*$' "$cfg"; then
+        rename_ini_section "$cfg" "crypto" "inactive"
+      elif grep -Eq '^[[:space:]]*\[removed\][[:space:]]*$' "$cfg"; then
+        rename_ini_section "$cfg" "removed" "inactive"
+      fi
+      ;;
+  esac
 }
 
 prepare_device_dir() {
   local device_id="$1"
   local device_dir="$DEVICES_ROOT/$device_id"
+  local device_cfg="$device_dir/filesend_config"
 
   mkdir -p "$device_dir"
-  cp "$TEMPLATE_CONFIG" "$device_dir/filesend_config"
+  cp "$ROOT_FILESEND_CONFIG" "$device_cfg"
 
   if [[ -n "${LATEST_CA_BASENAME:-}" && -f "$CA_DIR/$LATEST_CA_BASENAME" ]]; then
     cp "$CA_DIR/$LATEST_CA_BASENAME" "$device_dir/"
-    set_config_value "$device_dir/filesend_config" "cert_path" "$LATEST_CA_BASENAME"
+    set_config_value "$device_cfg" "cert_path" "$LATEST_CA_BASENAME"
   else
     warn "No CA cert available for device $device_id."
   fi
 
-  if [[ -n "${LATEST_PUB_BASENAME:-}" && -f "$SERVER_CRYPTO_DIR/$LATEST_PUB_BASENAME" ]]; then
-    cp "$SERVER_CRYPTO_DIR/$LATEST_PUB_BASENAME" "$device_dir/"
-    set_config_value "$device_dir/filesend_config" "pub_key_path" "$LATEST_PUB_BASENAME"
-  elif [[ -n "${LATEST_SYM_BASENAME:-}" && -f "$SERVER_CRYPTO_DIR/$LATEST_SYM_BASENAME" ]]; then
-    cp "$SERVER_CRYPTO_DIR/$LATEST_SYM_BASENAME" "$device_dir/"
-    set_config_value "$device_dir/filesend_config" "sym_key_path" "$LATEST_SYM_BASENAME"
-  elif [[ -n "${LATEST_PR_BASENAME:-}" && -f "$SERVER_CRYPTO_DIR/$LATEST_PR_BASENAME" ]]; then
-    cp "$SERVER_CRYPTO_DIR/$LATEST_PR_BASENAME" "$device_dir/"
-    set_config_value "$device_dir/filesend_config" "sym_key_path" "$LATEST_PR_BASENAME"
-  fi
+  apply_encrypt_mode_to_device_config "$device_cfg" "$device_id" "$device_dir"
 
-  if [[ "$CONN_MODE" == "ws" || "$CONN_MODE" == "wss" ]]; then
-    set_config_value "$device_dir/filesend_config" "use_ws" "true"
+  if [[ "$CONN_MODE" == "ws" ]]; then
+    set_config_value "$device_cfg" "use_ws" "true"
   else
-     set_config_value "$device_dir/filesend_config" "use_ws" "false"
+    set_config_value "$device_cfg" "use_ws" "false"
   fi
-  
-  set_config_value "$device_dir/filesend_config" "url" "$CONN_URL"
 
-  set_config_value "$device_dir/filesend_config" "device_id" "$device_id"
+  set_config_value "$device_cfg" "url" "$CONN_URL"
+  set_config_value "$device_cfg" "device_id" "$device_id"
 
   log "Prepared device directory: $device_dir"
 }
@@ -553,30 +750,49 @@ Server container:
   image: $SERVER_IMAGE
   status: $(container_running "$SERVER_CONTAINER_NAME" && echo running || echo stopped)
 
+Generated configs:
+  $ROOT_FILESEND_CONFIG
+  $SERVER_CONFIG_PATH
+
+Connection:
+  host = $SERVER_HOST
+  port = $SERVER_PORT
+  mode = $CONN_MODE
+  url  = $CONN_URL
+
+Encryption:
+  app.encrypt = $ENCRYPT_MODE
+
 Generated directories:
   $CRYPTO_ROOT
+  $CA_DIR
   $SERVER_CRYPTO_DIR
   $DEVICES_ROOT
+  $SYMM_ROOT
 
 Devices prepared:
 $(for d in "${DEVICES[@]}"; do printf '  - %s\n' "$d"; done)
 
-Connection settings written into each filesend_config:
-  mode = $CONN_MODE
-  url  = $CONN_URL
-
 EOF
 }
 
-# Main
-echo "[INFO] Building server image."
+log "Generating base configs."
+generate_base_configs
+
+log "Building server image."
 build_server_image
-echo "[INFO] Running server detached."
+
+log "Running server detached."
 run_server_detached
-echo "[INFO] Preparing server material."
+
+log "Preparing server material."
 prepare_server_material
 
-cd .. # return from server/
+log "Updating generated root filesend_config."
+update_root_filesend_config
+
+log "Updating generated server/server_config."
+update_generated_server_config
 
 log "Starting device directory preparation."
 log "Devices root: $DEVICES_ROOT"
@@ -590,9 +806,9 @@ done
 print_summary
 
 if [[ "$MODE" == "--multiple" ]]; then
-  echo "[INFO] Multiple-node mode selected."
-  echo "[INFO] The server container is running in detached mode."
-  echo "[INFO] The app container was NOT started by design."
+  log "Multiple-node mode selected."
+  log "The server container is running in detached mode."
+  log "The app container was NOT started by design."
   echo
   echo "To add a new device later, re-run:"
   echo "  ./$SCRIPT_NAME --multiple <config-with-new-device.json>"
