@@ -1,24 +1,7 @@
-# Build: 
-# docker build \
-#    -f Dockerfile.sender \
-#    --build-arg USER_ID="$(id -u)" \
-#    --build-arg GROUP_ID="$(id -u)" \
-#    -t filesend-app . 
-
-# Run: 
-# docker run --rm -it \
-#   --name filesend-dev \
-#   --user "$(id -u):$(id -g)" \
-#   --network=host \
-#   -v "$(pwd):/workspace" \
-#   -w /workspace \
-#   filesend-app
-
-FROM debian:bullseye-slim
+FROM debian:bullseye-slim AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install required dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     g++ \
@@ -26,40 +9,46 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     pkg-config \
     ca-certificates \
-    openssl \
     libssl-dev \
     libsodium-dev \
     libcurl4-openssl-dev \
     libzip-dev \
     libarchive-dev \
     libboost-all-dev \
-    zip \
-    unzip \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory
 WORKDIR /workspace
-
-# Build the app
 COPY . /workspace
 RUN make
-COPY bin/filesend /usr/local/bin/filesend
+
+FROM debian:bullseye-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    openssl \
+    libsodium23 \
+    libssl1.1 \
+    libcurl4 \
+    libzip4 \
+    libarchive13 \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /workspace/bin/filesend /usr/local/bin/filesend
 RUN chmod +x /usr/local/bin/filesend
 
-# Default user settings via build args
+WORKDIR /workspace
+
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=user
 
-# Create group and user, set permissions for /workspace
 RUN groupadd -g ${GROUP_ID} ${USERNAME} && \
     useradd -m -u ${USER_ID} -g ${GROUP_ID} -s /bin/bash ${USERNAME} && \
     mkdir -p /workspace/incoming_files && \
     chown -R ${USER_ID}:${GROUP_ID} /workspace
 
-# Switch to the newly created user
 USER ${USER_ID}:${GROUP_ID}
-
-# Default command
 CMD ["/bin/bash"]
