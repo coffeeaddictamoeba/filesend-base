@@ -6,7 +6,7 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 
 ---
 
-- Setup using config files is now also possible for both sender and server (see example files)
+- Setup using config files is now also possible for both sender node/device and filesend-server (see example files)
 - Multithreading supports batch sending
 - Archive option is added for sending, encryption and decryption
 - File encryption format standardized
@@ -15,41 +15,52 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 - **Dockerization of sender and server code added**
 - **Key generation added**
 
-### Defaults
+## Default Setup
 
 ---
 
-- Program is compiled with `FILESEND_PROFILE_FULL` and server is compiled with `FILESEND_PROFILE_MINIMAL_WS`
-- When running a server with **Docker**, all the necessary security material (server key, server certificate, encryption keys) is generated and `server_config` is updated **automatically **
-- When running a server with **Docker**, server starts **automatically**
-- Sender's `filesend` and server are expected to be **different devices** on the **same network** (but you still can run both as separate processes on one machine for testing purposes)
-- `--retry <n>` option in `filesend` (same as `retry` field in `filesend_config` ) will retry **only in case of connection failure** but NOT in case of failed file processing
-- For the fast setup, defaults are **WebSocket connection**, **TLS via CA certificate** and **asymmetric cryptosystem** for file contents encryption
+**NOTE:** The only dependency needed for default and advanced setup is Docker.
 
-#### Default Configuration Setup
-
----
-
-##### **Fast setup using `node-setup.sh`**
-
-For the fast setup everything you need is the repo itself and Docker installed.
+First, make these 2 files (`node-setup.sh` and `generate-configs.sh`) executable:
 
 ```bash
-chmod +x node-setup.sh generate-configs.sh  # allow execution
-./node-setup.sh --one        # run for testing on single device (creates server + app containers, leaves in app container's shell)
-./node-setup.sh --multiple   # run for starting the server and generating all the necessary device configuration inside crypto/asymm/devices (or crypto/symm/devices)
+chmod +x node-setup.sh generate-configs.sh
 ```
 
-- Running with option `--one` will assume you have only one node for both sender and server so the code execution will leave you in a sender's shell so you can select a directory an run the testing on it via `filesend send my_dir/` This option is for fast one-device testing
-- Running with option `--multiple` will start the server and prepare the security material for nodes just as a command above but it will not create an app container as it is assumed the app container will run on one or multiple nodes (sender devices) which are different from the server device
+Second, run the `node-setup.sh` for single-device testing or for multiple devices setup:
 
-If you want to review or modify the default fast setup, check the `setup.json` file.
+```bash
+# to test on one device (sets up both filesend-server and filesend app, genrates security material)
+./node-setup.sh --one my_files/ setup.json
 
-##### Manual Setup
+# to test on multiple devices (sets up a filesend-server and generates a security material; app setup is expected to be on-device)
+./node-setup.sh --multiple my_files/ setup.json
 
-Fast setup automates all the steps below but for more control over the setup process you can follow the manual setup steps:
+```
 
-1. Build **server** container from the repo root `filesend-base/`:
+Here `my_files/` is a directory with the files you want to send. The `filesend` runs in a **daemon mode** monitors this exact directory with **no timeout**.
+
+**NOTE:** If running `--one` mode please check this directory is inside the mounted folder (repo root, `filesend-base`).
+
+
+The configuration defaults:
+
+- Filesend-app is compiled with `FILESEND_PROFILE_FULL` and filesend-server is compiled with `FILESEND_PROFILE_MINIMAL_WS`
+- All the necessary security material (server key, server certificate, encryption keys) is generated and configs (`filesend_config` and `server/server_config`) are updated accordingly
+- Server starts **automatically**
+- Default configuration is **WebSocket connection**, **TLS via CA certificate** and **asymmetric cryptosystem** for file contents encryption (all settings for `node-setup.sh`-based setup are in `setup.json` file)
+
+## Advanced Setup
+
+---
+
+The setup described above automates all the steps below but for more control over the setup process you can follow the manual setup steps:
+
+1. Create `filesend_config` and `server/server_config` by running:
+   ```bash
+   chmod +x generate-configs.sh && ./generate-configs.sh
+   ```
+2. Build **filesend-server** container from the repo root `filesend-base/`:
 
 ```bash
    docker build \
@@ -59,7 +70,7 @@ Fast setup automates all the steps below but for more control over the setup pro
       -t filesend-server-dev .
 ```
 
-2. Run server from `server/` directory (so we do not copy the files present in `server/` to the current directory once again):
+2. Run filesend-server from `server/` directory (so we do not copy the files present in `server/` to the current directory once again):
 
    ```bash
    docker run --rm -it \
@@ -68,8 +79,8 @@ Fast setup automates all the steps below but for more control over the setup pro
       -e SERVER_MODE=ws \
       filesend-server-dev
    ```
-3. Copy the `ca_cert-date.pem`, `pub-date.key` and `pr-date.key` to the sender (machine running `filesend`) and change the `filesend_config` accordingly.
-4. Either compile natively (see the list of dependencies and compile options below) or build a container for the **application** from the repo root `filesend-base/`. Do this in a separate process or shell, if running both server and filesend application code on a single machine.
+3. Copy the `ca_cert-date.pem`, `pub-date.key` and `pr-date.key` to the sender node (device running `filesend`) and change the `filesend_config` accordingly.
+4. Either compile natively (see the list of dependencies and compile options below) or build a container for the **filesend-app** from the repo root `filesend-base/`. Do this in a separate process or shell, if running both filesend-server and filesend-app code on a single node (the same device).
 
    ```bash
    # Skip first two commands if compiling natively
@@ -93,7 +104,7 @@ Fast setup automates all the steps below but for more control over the setup pro
    # Either inside of container or natively, compile with:
    make # -DFILESEND_PROFILE_*
    ```
-5. After successful compilation, try running `filesend` with some directory containing files. If running from Docker container, this directory should be inside the mounted folder.
+5. After successful compilation, try running `filesend` with some directory containing files. If running from Docker container, this directory **should be inside the mounted folder**.
 
    ```bash
    # Directory tree expected:
@@ -106,7 +117,7 @@ Fast setup automates all the steps below but for more control over the setup pro
    # Run the filesend binary (this exact command will use filesend_config to set up the paramenters of running)
    path/to/./filesend send my_files/
    ```
-6. Both of the sides (server and sender) have their logs which explicitly show if sending succeeded or not, and if not then what was the reason.
+6. Both of the sides (filesend-server and filesend-app) have their logs which explicitly show if sending succeeded or not, and if not then what was the reason.
 
 #### Common Issues
 
@@ -114,32 +125,32 @@ Fast setup automates all the steps below but for more control over the setup pro
 
 1. `decrypt failed`
 
-   * In server logs: ` ERROR | peer=ip:port device=my_device file=my_file.ext.enc | decrypt failed (code=1)`
-   * This problem occurs if keys on server and sender sides do not match. To find the reason of the mismatch, check:
+   * In filesend-server logs: ` ERROR | peer=ip:port device=my_device file=my_file.ext.enc | decrypt failed (code=1)`
+   * This problem occurs if keys on filesend-server and filesend-app on the node sides do not match. To find the reason of the mismatch, check:
      * Are config vaues of key names match on server and sender? Do these keys have same contents?
      * Does the `filesend` binary see the keys?
      * Was the file encrypted?
      * Is `.env` sourced on server? If using CLI, is `.env` sourced on sender? Are `.env` values correct?
    * **Fix:** try to regenerate the keys and update values in configs and `.env`s.
-2. On sender: `connection refused`
+2. On filesend-app: `connection refused`
 
-   * In sender logs: `[WS] connect_tls exception: connect: Connection refused [system:111 at ... in function 'connect']`
-   * This problem occurs when the sender and server ports do not match or the server is not running.
-     * Check configuration files of both sender and server. Compare sender's `url` field with server's `port` and `host` fields.
-     * Check if server is running.
+   * In filesend-app logs: `[WS] connect_tls exception: connect: Connection refused [system:111 at ... in function 'connect']`
+   * This problem occurs when the filesend-app and filesend-server ports do not match or the server is not running.
+     * Check configuration files of both filesend-app and filesend-server. Compare app's `url` field with server's `port` and `host` fields.
+     * Check if filesend-server is running.
      * Check if you run the correct server (i.e, if sending via WebSocket, running server should be `runserver_ws.py`)
      * If using Docker, check if correct port is exposed and passed in `-p` option when running the container.
    * **Fix:** if you have a problem connecting to a certain port, either change it or temporarily enable network by passing `--network=host` to the server's container on run.
-3. On server: `device token missing`
+3. On filesend-server: `device token missing`
 
    * Server logs: `Auth is enabled but token file is missing/empty (devtokens.json). All devices will be rejected.`
    * This problem occurs if `server_config` has `require_auth = true` and `devtokens.json` (file with device tokens) does not contain the correct device token.
      * Check if `devtokens.json` exists and has a correct device token.
-     * Check if sender's config `filesend_config` has `device_id` set to to device token.
+     * Check if filesend-app's config `filesend_config` has `device_id` set to to device token.
    * **Fix:** if error persists, try setting `require_auth` in `server_config` to `false` or generate new device token and update the necessary files.
-4. On sender: `load_verify_file: No such file or directory`
+4. On filesend-app: `load_verify_file: No such file or directory`
 
-   - Sender logs: `terminate called after throwing an instance of '...' what():  load_verify_file: No such file or directory`
+   - Filesend-app logs: `terminate called after throwing an instance of '...' what():  load_verify_file: No such file or directory`
    - This problem occurs when app cannot resolve a path from `filesend_config`.
      - Check if all paths inside `filesend_config` are valid and exist
 
@@ -166,7 +177,7 @@ By default all of the application features are enabled, but if you want to have 
 
 Assume your initial directory for incoming images is `mydir/`
 
-* When running the program in sending mode, it creates a directory tree under the initial directory `mydir/`. This is optional for single-threaded sending but crucial for multithreaded version.
+* When running the program in sending mode with filesend-app, it creates a directory tree under the initial directory `mydir/`. This is optional for single-threaded sending but crucial for multithreaded version.
 * `mydir/.filesend_archive` - an archive that stores all processed files during the sending. Needs flag `archive` to be set in config or by CLI.
 * `mydir/.filesend_outbox` - last directory before a file that is sent to a server. If a file gets there, its preprocessing was successful.
 * `mydir/.filesend_tmp` - a directory for temporary file processing steps.
@@ -181,9 +192,7 @@ Assume your initial directory for incoming images is `mydir/`
 
 ---
 
-**NOTE:** if using Docker containers, the only dependency needed overall is Docker itself.
-
-These dependencies are required to run `filesend`:
+These dependencies are required to run `filesend` natively without using Docker containers:
 
 - libsodium (cryptography; necessary)
 - libssl (secure connection; necessary)
@@ -191,7 +200,7 @@ These dependencies are required to run `filesend`:
 - libboost for boost.beast and boost.asio headers (WebSocket connection; necessary, but can be optional if HTTP connection dependency is present)
 - libzip & libarchive (batch archives in `zip`, `tar` and `tar.gz` formats)
 
-These dependencies are required to run server (pip):
+These dependencies are required to run filesend-server (pip):
 
 - websockets (if using WebSocket)
 - aiohttp (if using HTTP)
@@ -219,7 +228,7 @@ filesend keygen [--symmetric|--asymmetric]
 - Pass both `--retry <n>` and `--no-retry` : these options are for **opposite scenarios**. It is not recommended to use `--retry 0` instead of `--no-retry`.
 - Not an error, but **avoid sending a single file** instead of a directory with `--batch` option. It will work, but there is no need to create a batch out of 1 file.
 
-**IMPORTANT:** These limitations apply to **config-based setup** as well.
+These limitations apply to **config-based setup** as well.
 
 #### **Configs**
 
@@ -238,7 +247,7 @@ filesend send my_files/
 filesend <mode> <path> --arg  # will use CLI instead of config
 ```
 
-Example of **app** config file structure (sender):
+Example of **app** config file structure (`filesend`):
 
 ```
 [global]
@@ -327,9 +336,7 @@ file  = logs/server.log           # log file path
 
 ---
 
-Sends a file to a remote HTTPS / WS server.
-
-You may choose whether to encrypt the file before sending it.
+Sends a file to a remote HTTPS / WS server. You may choose whether to encrypt the file before sending it.
 
 ```
 filesend send [--https|--ws] <path> <url> [--encrypt symmetric|asymmetric] [--all][--timeout <n>] [--retry <n>][--no-retry] [--batch <n>] [--archive] [--nthreads <n>]
