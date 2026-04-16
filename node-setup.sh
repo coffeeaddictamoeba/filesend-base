@@ -1,21 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Sets up a local filesend Docker test environment from a JSON config.
-# It generates base config files, builds and starts the server container,
-# collects server-generated crypto/TLS material, updates shared and per-device
-# filesend configs, and prepares device directories under crypto/.
-#
-# In --multiple mode, it prepares or refreshes only the server side and device
-# configuration material and leaves the server running.
-#
-# In --one mode, it also builds and runs the app container and starts:
-#   filesend send <incoming_directory>
-# using the provided incoming directory inside the mounted workspace.
-#
-# By default, the script reuses existing containers, images, configs, and
-# device data where possible. Use --force to rebuild all or selected parts.
-
 SCRIPT_NAME="$(basename "$0")"
 
 die()  { echo "[ERROR] $*" >&2; exit 1; }
@@ -27,25 +12,33 @@ trap 'ec=$?; (( ec == 0 )) || warn "Script failed with exit code $ec."' EXIT
 usage() {
   cat <<EOF
 Usage:
-  $SCRIPT_NAME --one <incoming_directory> [config.json] [--force[=all|server|devices]]
-  $SCRIPT_NAME --multiple <incoming_directory> [config.json] [--force[=all|server|devices]]
+  $SCRIPT_NAME <incoming_dir> [config.json] [--force[=all|server|devices]]
+  $SCRIPT_NAME <incoming_dir> [config.json] --devices <id1,id2,...> [--force[=all|server|devices]]
+  $SCRIPT_NAME <incoming_dir> [config.json] --add-device <id> [--force[=all|server|devices]]
 
-Modes:
-  --one       Build/run server if needed, prepare configs/keys, then build/run
-              the app container with: filesend send <incoming_directory>
-  --multiple  Build/run only the server side if needed and prepare device configs
+Behavior:
+  - Builds server/app images if needed
+  - Generates base configs if needed
+  - Generates or repairs security material by calling generate-security.sh
+  - Prepares device directories only; does not run containers
+  - Creates a per-device incoming directory:
+      crypto/asymm/devices/<device_id>/<incoming_dir>
+
+Selection:
+  --devices <ids>       Prepare only the listed devices
+  --add-device <id>     Prepare one new device without touching existing device material
 
 Force options:
-  --force           Same as --force=all
-  --force=all       Rebuild everything
-  --force=server    Rebuild server only; do not rebuild device dirs
-  --force=devices   Rebuild device dirs only; do not rebuild server
+  --force               Same as --force=all
+  --force=all           Rebuild everything
+  --force=server        Rebuild images/base/server-side material
+  --force=devices       Rebuild selected device directories only
 
 Examples:
-  $SCRIPT_NAME --one ./incoming
-  $SCRIPT_NAME --one ./incoming setup.json
-  $SCRIPT_NAME --one ./incoming setup.json --force
-  $SCRIPT_NAME --multiple ./incoming config.json --force=devices
+  $SCRIPT_NAME incoming
+  $SCRIPT_NAME incoming setup.json --devices dev1,dev2
+  $SCRIPT_NAME incoming setup.json --add-device dev3
+  $SCRIPT_NAME incoming setup.json --force=devices
 EOF
 }
 
@@ -53,50 +46,114 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
-for cmd in docker python3 grep sed find cp mkdir chmod id sleep rm; do
+for cmd in docker python3 grep sed find cp mkdir chmod id rm; do
   require_cmd "$cmd"
 done
 
-MODE=""
 INCOMING_DIR=""
 CONFIG_FILE="setup.json"
-FORCE_MODE=""   # "", "all", "server", "devices"
+FORCE_MODE=""
+DEVICE_SELECTION_RAW=""
+ADD_DEVICE_ID=""
+
+REPO_ROOT=""
+SERVER_DOCKERFILE=""
+SERVER_IMAGE=""
+SERVER_CONTAINER_NAME=""
+SERVER_WORKSPACE_DIR=""
+SERVER_PORT_MAP=""
+SERVER_MODE_ENV=""
+
+APP_DOCKERFILE=""
+APP_IMAGE=""
+APP_CONTAINER_NAME=""
+APP_WORKSPACE_DIR=""
+APP_NETWORK=""
+APP_ENCRYPT_RAW=""
+
+CONN_MODE_RAW=""
+CONN_URL_RAW=""
+
+CONN_MODE=""
+ENCRYPT_MODE=""
+SERVER_HOST=""
+SERVER_PORT=""
+CONN_URL=""
+
+SERVER_WORKSPACE_ABS=""
+APP_WORKSPACE_ABS=""
+
+GENERATE_CONFIGS_SCRIPT=""
+GENERATE_SECURITY_SCRIPT=""
+ROOT_FILESEND_CONFIG=""
+SERVER_CONFIG_PATH=""
+
+CRYPTO_ROOT=""
+ASYMM_ROOT=""
+SYMM_ROOT=""
+SERVER_CRYPTO_DIR=""
+DEVICES_ROOT=""
+CA_DIR=""
+
+LATEST_CA_BASENAME=""
+LATEST_PUB_BASENAME=""
+LATEST_SYM_BASENAME=""
+LATEST_PR_BASENAME=""
+LATEST_SERVER_CERT_BASENAME=""
+LATEST_SERVER_KEY_BASENAME=""
+
+DEVICES=()
+SELECTED_DEVICES=()
 
 parse_args() {
-  [[ $# -ge 2 ]] || { usage; exit 1; }
+  [[ $# -ge 1 ]] || { usage; exit 1; }
 
-  case "$1" in
-    --one|--multiple) MODE="$1" ;;
-    *) usage; die "Unknown mode: $1" ;;
-  esac
+  INCOMING_DIR="$1"
+  shift
 
-  INCOMING_DIR="$2"
-  [[ -n "$INCOMING_DIR" ]] || die "Incoming directory must not be empty."
-  shift 2
-
-  for arg in "$@"; do
-    case "$arg" in
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      *.json)
+        CONFIG_FILE="$1"
+        ;;
       --force)
         FORCE_MODE="all"
         ;;
       --force=*)
-        FORCE_MODE="${arg#--force=}"
+        FORCE_MODE="${1#--force=}"
         ;;
-      *.json)
-        CONFIG_FILE="$arg"
+      --devices)
+        shift
+        [[ $# -gt 0 ]] || die "--devices requires a value"
+        DEVICE_SELECTION_RAW="$1"
+        ;;
+      --add-device)
+        shift
+        [[ $# -gt 0 ]] || die "--add-device requires a value"
+        ADD_DEVICE_ID="$1"
+        ;;
+      --help|-h)
+        usage
+        exit 0
         ;;
       *)
-        die "Unknown argument: $arg"
+        die "Unknown argument: $1"
         ;;
     esac
+    shift
   done
 
+  [[ -n "$INCOMING_DIR" ]] || die "Incoming directory must not be empty."
   [[ -f "$CONFIG_FILE" ]] || die "Config file not found: $CONFIG_FILE"
 
   case "$FORCE_MODE" in
     ""|all|server|devices) ;;
     *) die "Invalid --force value: $FORCE_MODE" ;;
   esac
+
+  if [[ -n "$DEVICE_SELECTION_RAW" && -n "$ADD_DEVICE_ID" ]]; then
+    die "Use either --devices or --add-device, not both."
+  fi
 }
 
 should_force_all()     { [[ "$FORCE_MODE" == "all" ]]; }
@@ -141,9 +198,9 @@ normalize_connection_mode() {
   local mode
   mode="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
   case "$mode" in
-    ""|ws|wss)   printf '%s\n' "ws" ;;
-    http|https)  printf '%s\n' "http" ;;
-    *) die "Unsupported server_connection.mode: $1 (expected http, https, ws, or wss)." ;;
+    ""|ws|wss) printf '%s\n' "ws" ;;
+    http|https) printf '%s\n' "http" ;;
+    *) die "Unsupported server_connection.mode: $1" ;;
   esac
 }
 
@@ -154,7 +211,7 @@ normalize_encrypt_mode() {
     ""|asymm|asymmetric) printf '%s\n' "asymm" ;;
     symm|symmetric)      printf '%s\n' "symm" ;;
     no|none|off)         printf '%s\n' "no" ;;
-    *) die "Unsupported app.encrypt: $1 (expected asymm, symm, or no)." ;;
+    *) die "Unsupported app.encrypt: $1" ;;
   esac
 }
 
@@ -202,8 +259,7 @@ PY
 }
 
 resolve_filesend_url() {
-  local mode="$1"
-  local raw_url="$2"
+  local mode="$1" raw_url="$2"
   local host port
 
   host="$(extract_host_from_url "$raw_url")"
@@ -214,7 +270,7 @@ resolve_filesend_url() {
   fi
 
   case "$mode" in
-    ws)   printf '%s\n' "wss://${host}:${port}" ;;
+    ws) printf '%s\n' "wss://${host}:${port}" ;;
     http) printf '%s\n' "https://${host}:${port}/upload" ;;
     *) die "Cannot resolve filesend URL for mode: $mode" ;;
   esac
@@ -258,10 +314,6 @@ container_exists() {
   docker ps -a --format '{{.Names}}' | grep -Fxq "$1"
 }
 
-container_running() {
-  docker ps --format '{{.Names}}' | grep -Fxq "$1"
-}
-
 image_exists() {
   docker image inspect "$1" >/dev/null 2>&1
 }
@@ -302,101 +354,87 @@ generate_base_configs() {
   [[ -f "$SERVER_CONFIG_PATH" ]] || die "Generated server/server_config not found: $SERVER_CONFIG_PATH"
 }
 
-run_server_detached() {
-  remove_container_if_exists "$SERVER_CONTAINER_NAME"
-
-  log "Starting server container: $SERVER_CONTAINER_NAME"
-  docker run -d \
-    --name "$SERVER_CONTAINER_NAME" \
-    -p "$SERVER_PORT_MAP" \
-    -v "$SERVER_WORKSPACE_ABS:/workspace" \
-    -e "SERVER_MODE=$SERVER_MODE_ENV" \
-    "$SERVER_IMAGE" >/dev/null
-
-  sleep 5
-
-  if container_running "$SERVER_CONTAINER_NAME"; then
-    log "Server container is running"
-    return
+ensure_base_configs() {
+  if should_force_all || [[ ! -f "$ROOT_FILESEND_CONFIG" || ! -f "$SERVER_CONFIG_PATH" ]]; then
+    generate_base_configs
+  else
+    log "Reusing existing generated configs"
   fi
-
-  warn "Server container exited shortly after startup."
-  warn "Container status:"
-  docker ps -a --filter "name=^${SERVER_CONTAINER_NAME}$" || true
-  warn "Server logs:"
-  docker logs "$SERVER_CONTAINER_NAME" || true
-  die "Server container did not stay running."
 }
 
-ensure_server_available() {
-  if should_force_server || ! container_exists "$SERVER_CONTAINER_NAME"; then
-    log "Rebuilding server (force=${FORCE_MODE:-none})"
+ensure_server_images() {
+  if should_force_server || ! image_exists "$SERVER_IMAGE"; then
     docker_build "$SERVER_IMAGE" "$SERVER_DOCKERFILE" USER_UID USER_GID
-    run_server_detached
-    SERVER_REFRESHED="true"
-    return
+  else
+    log "Reusing existing server image: $SERVER_IMAGE"
   fi
 
-  log "Reusing existing server container"
-  if ! container_running "$SERVER_CONTAINER_NAME"; then
-    log "Starting existing server container"
-    docker start "$SERVER_CONTAINER_NAME" >/dev/null
-    sleep 2
+  if should_force_all || ! image_exists "$APP_IMAGE"; then
+    docker_build "$APP_IMAGE" "$APP_DOCKERFILE" USER_ID GROUP_ID
+  else
+    log "Reusing existing app image: $APP_IMAGE"
   fi
-  SERVER_REFRESHED="false"
 }
 
-find_latest_in_server_container() {
-  local pattern="$1"
-  docker exec "$SERVER_CONTAINER_NAME" sh -lc "
-    for base in /workspace/keys /workspace/certs /workspace /root /home /tmp; do
-      [ -d \"\$base\" ] && find \"\$base\" -type f -name '$pattern' 2>/dev/null
-    done | sort | tail -n 1
-  " 2>/dev/null | tr -d '\r' || true
-}
+ensure_security_material() {
+  [[ -f "$GENERATE_SECURITY_SCRIPT" ]] || die "generate-security.sh not found: $GENERATE_SECURITY_SCRIPT"
+  chmod +x "$GENERATE_SECURITY_SCRIPT"
 
-copy_from_server_container_if_found() {
-  local container_path="$1" dest_dir="$2"
-  [[ -n "$container_path" ]] || return 1
-  docker cp "$SERVER_CONTAINER_NAME:$container_path" "$dest_dir/" >/dev/null
+  local gen_force=""
+  if should_force_all || should_force_server; then
+    gen_force="--force=all"
+  fi
+
+  log "Generating or repairing security material"
+  (
+    cd "$SERVER_WORKSPACE_ABS"
+    if [[ -n "$gen_force" ]]; then
+      "$GENERATE_SECURITY_SCRIPT" "$SERVER_WORKSPACE_ABS" "$gen_force"
+    else
+      "$GENERATE_SECURITY_SCRIPT" "$SERVER_WORKSPACE_ABS"
+    fi
+  )
 }
 
 load_existing_server_material_basenames() {
-  LATEST_CA_BASENAME="$(find "$CA_DIR" -maxdepth 1 -type f -name 'ca_cert-*.pem'   -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
-  LATEST_PUB_BASENAME="$(find "$SERVER_CRYPTO_DIR" -maxdepth 1 -type f -name 'pub*.bin'        -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
-  LATEST_PR_BASENAME="$(find "$SERVER_CRYPTO_DIR" -maxdepth 1 -type f -name 'pr*.bin'          -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
+  LATEST_CA_BASENAME="$(find "$CA_DIR" -maxdepth 1 -type f -name 'ca_cert-*.pem' -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
+  LATEST_PUB_BASENAME="$(find "$SERVER_CRYPTO_DIR" -maxdepth 1 -type f -name 'pub*.bin' -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
+  LATEST_PR_BASENAME="$(find "$SERVER_CRYPTO_DIR" -maxdepth 1 -type f -name 'pr*.bin' -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
   LATEST_SERVER_CERT_BASENAME="$(find "$SERVER_CRYPTO_DIR" -maxdepth 1 -type f -name 'server-*.crt' -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
-  LATEST_SERVER_KEY_BASENAME="$(find "$SERVER_CRYPTO_DIR" -maxdepth 1 -type f -name 'server-*.key'  -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
-  LATEST_SYM_BASENAME="$(find "$SYMM_ROOT" -maxdepth 1 -type f -name 'sym*.bin'                -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
+  LATEST_SERVER_KEY_BASENAME="$(find "$SERVER_CRYPTO_DIR" -maxdepth 1 -type f -name 'server-*.key' -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
+  LATEST_SYM_BASENAME="$(find "$SYMM_ROOT" -maxdepth 1 -type f -name 'sym*.bin' -printf '%f\n' 2>/dev/null | sort | tail -n 1 || true)"
 }
 
-prepare_server_material() {
-  log "Collecting security material from server container"
+mirror_security_material_from_server_workspace() {
+  local server_keys="$SERVER_WORKSPACE_ABS/keys"
+  local server_certs="$SERVER_WORKSPACE_ABS/certs"
 
-  local ca_cert pub_key sym_key pr_key server_cert server_key
-  ca_cert="$(find_latest_in_server_container 'ca_cert-*.pem')"
-  pub_key="$(find_latest_in_server_container 'pub*.bin')"
-  sym_key="$(find_latest_in_server_container 'sym*.bin')"
-  pr_key="$(find_latest_in_server_container 'pr*.bin')"
-  server_cert="$(find_latest_in_server_container 'server-*.crt')"
-  server_key="$(find_latest_in_server_container 'server-*.key')"
+  mkdir -p "$CA_DIR" "$SERVER_CRYPTO_DIR" "$SYMM_ROOT"
 
-  [[ -n "$ca_cert" ]]     && copy_from_server_container_if_found "$ca_cert" "$CA_DIR"                && LATEST_CA_BASENAME="$(basename "$ca_cert")"               || warn "CA certificate not found"
-  [[ -n "$pub_key" ]]     && copy_from_server_container_if_found "$pub_key" "$SERVER_CRYPTO_DIR"     && LATEST_PUB_BASENAME="$(basename "$pub_key")"              || warn "Public key not found"
-  [[ -n "$sym_key" ]]     && copy_from_server_container_if_found "$sym_key" "$SYMM_ROOT"             && LATEST_SYM_BASENAME="$(basename "$sym_key")"              || warn "Symmetric key not found"
-  [[ -n "$pr_key" ]]      && copy_from_server_container_if_found "$pr_key" "$SERVER_CRYPTO_DIR"      && LATEST_PR_BASENAME="$(basename "$pr_key")"                || warn "Private key not found"
-  [[ -n "$server_cert" ]] && copy_from_server_container_if_found "$server_cert" "$SERVER_CRYPTO_DIR" && LATEST_SERVER_CERT_BASENAME="$(basename "$server_cert")"  || warn "Server TLS certificate not found"
-  [[ -n "$server_key" ]]  && copy_from_server_container_if_found "$server_key" "$SERVER_CRYPTO_DIR"  && LATEST_SERVER_KEY_BASENAME="$(basename "$server_key")"    || warn "Server TLS key not found"
+  if compgen -G "$server_certs/ca_cert-*.pem" > /dev/null; then
+    cp -f "$server_certs"/ca_cert-*.pem "$CA_DIR/" 2>/dev/null || true
+  fi
+  if compgen -G "$server_keys/pub*.bin" > /dev/null; then
+    cp -f "$server_keys"/pub*.bin "$SERVER_CRYPTO_DIR/" 2>/dev/null || true
+  fi
+  if compgen -G "$server_keys/pr*.bin" > /dev/null; then
+    cp -f "$server_keys"/pr*.bin "$SERVER_CRYPTO_DIR/" 2>/dev/null || true
+  fi
+  if compgen -G "$server_keys/sym*.bin" > /dev/null; then
+    cp -f "$server_keys"/sym*.bin "$SYMM_ROOT/" 2>/dev/null || true
+  fi
+  if compgen -G "$server_keys/server-*.key" > /dev/null; then
+    cp -f "$server_keys"/server-*.key "$SERVER_CRYPTO_DIR/" 2>/dev/null || true
+  fi
+  if compgen -G "$server_certs/server-*.crt" > /dev/null; then
+    cp -f "$server_certs"/server-*.crt "$SERVER_CRYPTO_DIR/" 2>/dev/null || true
+  fi
 }
 
 ensure_server_material() {
-  if [[ "$SERVER_REFRESHED" == "true" ]]; then
-    prepare_server_material
-    return
-  fi
-
+  mirror_security_material_from_server_workspace
   load_existing_server_material_basenames
-  log "Reusing existing server crypto/TLS material"
+  log "Using security material present on disk"
 }
 
 apply_encrypt_mode_to_root_config() {
@@ -480,10 +518,22 @@ apply_encrypt_mode_to_device_config() {
   esac
 }
 
+normalize_incoming_subpath() {
+  local raw="$1"
+  local clean="${raw#./}"
+  clean="${clean#/}"
+  clean="${clean%/}"
+  [[ -n "$clean" ]] || die "Incoming directory must not be empty."
+  [[ "$clean" != *".."* ]] || die "Incoming directory must not contain '..'"
+  printf '%s\n' "$clean"
+}
+
 prepare_device_dir() {
   local device_id="$1"
+  local incoming_subpath="$2"
   local device_dir="$DEVICES_ROOT/$device_id"
   local device_cfg="$device_dir/filesend_config"
+  local device_incoming_dir="$device_dir/$incoming_subpath"
 
   mkdir -p "$device_dir"
   cp "$ROOT_FILESEND_CONFIG" "$device_cfg"
@@ -500,77 +550,52 @@ prepare_device_dir() {
   set_config_value "$device_cfg" "url" "$CONN_URL"
   set_config_value "$device_cfg" "device_id" "$device_id"
 
+  mkdir -p "$device_incoming_dir"
   log "Prepared device directory: $device_dir"
+  log "Prepared incoming directory: $device_incoming_dir"
+}
+
+resolve_selected_devices() {
+  if [[ -n "$ADD_DEVICE_ID" ]]; then
+    SELECTED_DEVICES=("$ADD_DEVICE_ID")
+    return
+  fi
+
+  if [[ -n "$DEVICE_SELECTION_RAW" ]]; then
+    IFS=',' read -r -a SELECTED_DEVICES <<< "$DEVICE_SELECTION_RAW"
+    [[ ${#SELECTED_DEVICES[@]} -gt 0 ]] || die "No device ids parsed from --devices."
+    return
+  fi
+
+  SELECTED_DEVICES=("${DEVICES[@]}")
 }
 
 prepare_devices() {
-  if should_force_devices; then
-    log "Forcing rebuild of device directories"
-    rm -rf "$DEVICES_ROOT"
-    mkdir -p "$DEVICES_ROOT"
+  local incoming_subpath="$1"
+
+  if should_force_devices && [[ -z "$ADD_DEVICE_ID" ]]; then
+    log "Forcing rebuild of selected device directories"
+    for device_id in "${SELECTED_DEVICES[@]}"; do
+      rm -r "$DEVICES_ROOT/$device_id"
+    done
   fi
 
-  for device_id in "${DEVICES[@]}"; do
+  for device_id in "${SELECTED_DEVICES[@]}"; do
+    [[ -n "$device_id" ]] || continue
+
     if [[ -d "$DEVICES_ROOT/$device_id" && ! should_force_devices ]]; then
+      if [[ -n "$ADD_DEVICE_ID" ]]; then
+        log "Device already exists and will be left untouched: $device_id"
+        mkdir -p "$DEVICES_ROOT/$device_id/$incoming_subpath"
+        continue
+      fi
       log "Reusing device directory: $DEVICES_ROOT/$device_id"
+      mkdir -p "$DEVICES_ROOT/$device_id/$incoming_subpath"
       continue
     fi
-    prepare_device_dir "$device_id"
+
+    prepare_device_dir "$device_id" "$incoming_subpath"
   done
-}
-
-resolve_container_incoming_dir() {
-  local raw="$1"
-  local abs_host
-
-  [[ -d "$raw" ]] || die "Incoming directory not found: $raw"
-  abs_host="$(cd "$raw" && pwd)"
-
-  case "$abs_host" in
-    "$APP_WORKSPACE_ABS")
-      printf '/workspace\n'
-      ;;
-    "$APP_WORKSPACE_ABS"/*)
-      printf '/workspace/%s\n' "${abs_host#"$APP_WORKSPACE_ABS"/}"
-      ;;
-    *)
-      die "Incoming directory must live under app workspace: $APP_WORKSPACE_ABS"
-      ;;
-  esac
-}
-
-should_force_app() {
-  [[ "$FORCE_MODE" == "all" ]] && return 0
-  [[ "$MODE" == "--one" && "$FORCE_MODE" == "devices" ]] && return 0
-  return 1
-}
-
-ensure_app_image() {
-  if should_force_app || ! image_exists "$APP_IMAGE"; then
-    docker_build "$APP_IMAGE" "$APP_DOCKERFILE" USER_ID GROUP_ID
-  else
-    log "Reusing existing app image: $APP_IMAGE"
-  fi
-}
-
-run_app_send() {
-  remove_container_if_exists "$APP_CONTAINER_NAME"
-
-  local incoming_container_path
-  incoming_container_path="$(resolve_container_incoming_dir "$INCOMING_DIR")"
-
-  log "Running app container: $APP_CONTAINER_NAME"
-  log "Command: filesend send $incoming_container_path"
-
-  docker run --rm -it \
-    --init \
-    --name "$APP_CONTAINER_NAME" \
-    --user "$(id -u):$(id -g)" \
-    --network="$APP_NETWORK" \
-    -v "$APP_WORKSPACE_ABS:/workspace" \
-    -w /workspace \
-    "$APP_IMAGE" \
-    filesend send "$incoming_container_path"
 }
 
 print_summary() {
@@ -581,16 +606,17 @@ Setup completed.
 Repo root:
   $REPO_ROOT
 
-Incoming directory:
+Incoming directory name:
   $INCOMING_DIR
 
 Force mode:
   ${FORCE_MODE:-none}
 
-Server container:
-  name: $SERVER_CONTAINER_NAME
-  image: $SERVER_IMAGE
-  status: $(container_running "$SERVER_CONTAINER_NAME" && echo running || echo stopped)
+Server image:
+  $SERVER_IMAGE
+
+App image:
+  $APP_IMAGE
 
 Generated configs:
   $ROOT_FILESEND_CONFIG
@@ -612,8 +638,8 @@ Generated directories:
   $DEVICES_ROOT
   $SYMM_ROOT
 
-Devices from config:
-$(for d in "${DEVICES[@]}"; do printf '  - %s\n' "$d"; done)
+Prepared devices:
+$(for d in "${SELECTED_DEVICES[@]}"; do printf '  - %s\n' "$d"; done)
 
 EOF
 }
@@ -661,13 +687,14 @@ load_config() {
   CONN_URL="$(resolve_filesend_url "$CONN_MODE" "${CONN_URL_RAW:-0.0.0.0}")"
   SERVER_PORT_MAP="${SERVER_PORT_MAP:-${SERVER_PORT}:${SERVER_PORT}}"
 
-  [[ ${#DEVICES[@]} -gt 0 ]] || die 'No devices found in config under "devices".'
+  [[ ${#DEVICES[@]} -gt 0 ]] || warn 'No devices found in config under "devices".'
 
   REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
   SERVER_WORKSPACE_ABS="$(cd "$REPO_ROOT/$SERVER_WORKSPACE_DIR" && pwd)"
   APP_WORKSPACE_ABS="$(cd "$REPO_ROOT/$APP_WORKSPACE_DIR" && pwd)"
 
   GENERATE_CONFIGS_SCRIPT="$REPO_ROOT/generate-configs.sh"
+  GENERATE_SECURITY_SCRIPT="$REPO_ROOT/generate-security.sh"
   ROOT_FILESEND_CONFIG="$REPO_ROOT/filesend_config"
   SERVER_CONFIG_PATH="$REPO_ROOT/server/server_config"
 
@@ -679,14 +706,6 @@ load_config() {
   CA_DIR="$ASYMM_ROOT/CA"
 
   mkdir -p "$SERVER_CRYPTO_DIR" "$DEVICES_ROOT" "$CA_DIR" "$SYMM_ROOT"
-
-  LATEST_CA_BASENAME=""
-  LATEST_PUB_BASENAME=""
-  LATEST_SYM_BASENAME=""
-  LATEST_PR_BASENAME=""
-  LATEST_SERVER_CERT_BASENAME=""
-  LATEST_SERVER_KEY_BASENAME=""
-  SERVER_REFRESHED="false"
 }
 
 print_resolved_config() {
@@ -695,58 +714,33 @@ print_resolved_config() {
   log "  INCOMING_DIR=$INCOMING_DIR"
   log "  CONFIG_FILE=$CONFIG_FILE"
   log "  FORCE_MODE=${FORCE_MODE:-none}"
-  log "  SERVER_DOCKERFILE=$SERVER_DOCKERFILE"
   log "  SERVER_IMAGE=$SERVER_IMAGE"
-  log "  SERVER_CONTAINER_NAME=$SERVER_CONTAINER_NAME"
-  log "  SERVER_WORKSPACE_DIR=$SERVER_WORKSPACE_DIR"
-  log "  SERVER_PORT_MAP=$SERVER_PORT_MAP"
-  log "  SERVER_MODE_ENV=$SERVER_MODE_ENV"
-  log "  APP_DOCKERFILE=$APP_DOCKERFILE"
   log "  APP_IMAGE=$APP_IMAGE"
-  log "  APP_CONTAINER_NAME=$APP_CONTAINER_NAME"
-  log "  APP_WORKSPACE_DIR=$APP_WORKSPACE_DIR"
-  log "  APP_NETWORK=$APP_NETWORK"
   log "  ENCRYPT_MODE=$ENCRYPT_MODE"
   log "  CONN_MODE=$CONN_MODE"
   log "  SERVER_HOST=$SERVER_HOST"
   log "  SERVER_PORT=$SERVER_PORT"
   log "  CONN_URL=$CONN_URL"
-  log "  DEVICES_COUNT=${#DEVICES[@]}"
-}
-
-ensure_base_configs() {
-  if should_force_all || [[ ! -f "$ROOT_FILESEND_CONFIG" || ! -f "$SERVER_CONFIG_PATH" ]]; then
-    generate_base_configs
-  else
-    log "Reusing existing generated configs"
-  fi
 }
 
 main() {
   parse_args "$@"
   load_config
+  resolve_selected_devices
   print_resolved_config
 
+  local incoming_subpath
+  incoming_subpath="$(normalize_incoming_subpath "$INCOMING_DIR")"
+
   ensure_base_configs
-  ensure_server_available
+  ensure_server_images
+  ensure_security_material
   ensure_server_material
   update_root_filesend_config
   update_generated_server_config
-  prepare_devices
+  prepare_devices "$incoming_subpath"
 
   print_summary
-
-  if [[ "$MODE" == "--multiple" ]]; then
-    log "Multiple-node mode selected"
-    log "The app container was not started by design"
-    echo
-    echo "To add a new device later, re-run:"
-    echo "  ./$SCRIPT_NAME --multiple <incoming_directory> <config.json>"
-    exit 0
-  fi
-
-  ensure_app_image
-  run_app_send
 }
 
 main "$@"
