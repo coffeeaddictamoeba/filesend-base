@@ -10,10 +10,27 @@ log()  { echo "[INFO]  $*"; }
 usage() {
   cat <<EOF
 Usage:
-  $SCRIPT_NAME [workdir] [--force[=all|keys|tls]] [--no-update-env] [--no-update-server-config]
+  $SCRIPT_NAME [workdir] [--image NAME] [--container NAME] [--force[=all|keys|tls]] [--no-update-env] [--no-update-server-config]
 
 Arguments:
   workdir                      Working directory to operate in (default: current directory)
+
+Runtime options:
+  --image NAME                 Docker image used for filesend key generation
+                               (or set FILESEND_IMAGE_NAME)
+  --container NAME             Running container used for filesend key generation
+                               (or set FILESEND_CONTAINER_NAME)
+
+Behavior:
+  - Reuses existing usable material by default
+  - Repairs stale references in .env and server_config
+  - Generates filesend keys via Docker
+  - Generates TLS material on the host with openssl
+  - Writes into:
+      keys/
+      certs/
+      .env
+      server_config
 
 Force options:
   --force                      Same as --force=all
@@ -21,20 +38,12 @@ Force options:
   --force=keys                 Regenerate only filesend key material
   --force=tls                  Regenerate only TLS material
 
-Behavior:
-  - Reuses existing usable material by default
-  - Repairs stale references in .env and server_config
-  - Writes into:
-      keys/
-      certs/
-      .env
-      server_config
-
 Examples:
   $SCRIPT_NAME
-  $SCRIPT_NAME /workspace
-  $SCRIPT_NAME . --force
-  $SCRIPT_NAME . --force=tls --no-update-env
+  $SCRIPT_NAME . --image filesend-server-dev
+  $SCRIPT_NAME . --image filesend-server-dev --force
+  $SCRIPT_NAME . --container filesend-server-dev --force=keys
+  $SCRIPT_NAME . --image filesend-server-dev --force=tls --no-update-env
 EOF
 }
 
@@ -42,18 +51,22 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
-for cmd in bash date cp mkdir chmod grep sed find sort tr openssl; do
+for cmd in bash date cp mkdir chmod grep sed find sort tr openssl docker pwd mv rm; do
   require_cmd "$cmd"
 done
 
 WORKDIR="."
-FORCE_MODE=""   # "", all, keys, tls
+FORCE_MODE=""
 UPDATE_ENV="true"
 UPDATE_SERVER_CONFIG="true"
 
 DATE_TAG="$(date +%F)"
 CERT_SUBJECT="${CERT_SUBJECT:-/CN=localhost}"
 DEVICE_ID_VALUE="${DEVICE_ID_VALUE:-device_id}"
+
+FILESEND_IMAGE_NAME="${FILESEND_IMAGE_NAME:-}"
+FILESEND_CONTAINER_NAME="${FILESEND_CONTAINER_NAME:-}"
+FILESEND_BIN_IN_RUNTIME="${FILESEND_BIN_IN_RUNTIME:-/opt/filesend/filesend}"
 
 ASYM_PRIVATE_PATH_GEN=""
 ASYM_PUBLIC_PATH_GEN=""
@@ -72,6 +85,8 @@ FOUND_CA_CERT_PATH=""
 FOUND_SERVER_KEY_PATH=""
 FOUND_SERVER_CERT_PATH=""
 
+KEYGEN_BACKEND=""   # container|image
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -84,6 +99,22 @@ parse_args() {
         ;;
       --force=*)
         FORCE_MODE="${1#--force=}"
+        ;;
+      --image)
+        shift
+        [[ $# -gt 0 ]] || die "Missing value for --image"
+        FILESEND_IMAGE_NAME="$1"
+        ;;
+      --image=*)
+        FILESEND_IMAGE_NAME="${1#--image=}"
+        ;;
+      --container)
+        shift
+        [[ $# -gt 0 ]] || die "Missing value for --container"
+        FILESEND_CONTAINER_NAME="$1"
+        ;;
+      --container=*)
+        FILESEND_CONTAINER_NAME="${1#--container=}"
         ;;
       --no-update-env)
         UPDATE_ENV="false"
@@ -111,26 +142,12 @@ parse_args() {
   esac
 }
 
-should_force_all()  { [[ "$FORCE_MODE" == "all" ]]; }
 should_force_keys() { [[ "$FORCE_MODE" == "all" || "$FORCE_MODE" == "keys" ]]; }
 should_force_tls()  { [[ "$FORCE_MODE" == "all" || "$FORCE_MODE" == "tls" ]]; }
 
 ensure_dir() {
   local dir="$1"
   [[ -d "$dir" ]] || mkdir -p "$dir"
-}
-
-copy_if_missing() {
-  local src="$1" dst="$2"
-  if [[ -f "$src" && ! -f "$dst" ]]; then
-    cp "$src" "$dst"
-    log "Copied $src -> $dst"
-  fi
-}
-
-prepare_temp_input() {
-  local file="$1"
-  printf 'bootstrap-%s\n' "$DATE_TAG" > "$file"
 }
 
 ensure_env_file() {
@@ -145,35 +162,6 @@ ensure_env_file() {
     : > "$env_file"
     log "Created empty $env_file"
   fi
-}
-
-ensure_filesend_binary() {
-  local baked_bin="/opt/filesend/filesend"
-  local dst_dir="bin"
-  local dst_file="${dst_dir}/filesend"
-
-  if [[ -x "$dst_file" ]]; then
-    log "Using existing filesend binary at $dst_file"
-    return 0
-  fi
-
-  if [[ -f "$baked_bin" ]]; then
-    ensure_dir "$dst_dir"
-    cp -f "$baked_bin" "$dst_file"
-    chmod +x "$dst_file"
-    log "Initialized filesend binary at $dst_file"
-    return 0
-  fi
-
-  if command -v filesend >/dev/null 2>&1; then
-    ensure_dir "$dst_dir"
-    cp -f "$(command -v filesend)" "$dst_file"
-    chmod +x "$dst_file"
-    log "Copied filesend from PATH to $dst_file"
-    return 0
-  fi
-
-  die "Could not find filesend binary at /opt/filesend/filesend or in PATH."
 }
 
 update_ini_value() {
@@ -319,39 +307,113 @@ tls_missing() {
   return 1
 }
 
-generate_filesend_keys() {
-  local mode="$1" outdir="$2"
+container_exists() {
+  local name="$1"
+  docker inspect "$name" >/dev/null 2>&1
+}
 
-  ensure_dir "$outdir"
-  local tmpfile="${outdir}/myfile.tmp"
-  prepare_temp_input "$tmpfile"
+container_is_running() {
+  local name="$1"
+  [[ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || true)" == "true" ]]
+}
 
-  log "Generating ${mode} key material via filesend in ${outdir}"
-  (
-    cd "$outdir"
-    unset PUB_KEY_PATH || true
-    unset PR_KEY_PATH || true
-    unset SYM_KEY_PATH || true
-    "../../bin/./filesend" encrypt myfile.tmp "--${mode}"
-  )
+image_exists() {
+  local name="$1"
+  docker image inspect "$name" >/dev/null 2>&1
+}
 
-  rm -f "$tmpfile"
+container_exec_sh() {
+  local script="$1"
+  docker exec "$FILESEND_CONTAINER_NAME" sh -lc "$script"
+}
+
+select_keygen_backend() {
+  KEYGEN_BACKEND=""
+
+  if [[ -n "$FILESEND_CONTAINER_NAME" ]] && container_exists "$FILESEND_CONTAINER_NAME" && container_is_running "$FILESEND_CONTAINER_NAME"; then
+    if container_exec_sh "test -x \"$FILESEND_BIN_IN_RUNTIME\""; then
+      KEYGEN_BACKEND="container"
+      log "Using running container for key generation: $FILESEND_CONTAINER_NAME"
+      return 0
+    fi
+    warn "Running container '$FILESEND_CONTAINER_NAME' does not have executable: $FILESEND_BIN_IN_RUNTIME"
+  fi
+
+  if [[ -n "$FILESEND_IMAGE_NAME" ]]; then
+    image_exists "$FILESEND_IMAGE_NAME" || die "Image not found: $FILESEND_IMAGE_NAME"
+
+    if docker run --rm --entrypoint sh "$FILESEND_IMAGE_NAME" -lc "test -x \"$FILESEND_BIN_IN_RUNTIME\""; then
+      KEYGEN_BACKEND="image"
+      log "Using Docker image for key generation: $FILESEND_IMAGE_NAME"
+      return 0
+    fi
+
+    die "filesend binary not found in image '$FILESEND_IMAGE_NAME' at '$FILESEND_BIN_IN_RUNTIME'"
+  fi
+
+  die "No usable filesend key generation backend found. Pass --image NAME or a running --container NAME."
+}
+
+run_filesend_keygen() {
+  local mode="$1"
+  local host_outdir="$2"
+  local host_outdir_abs
+
+  ensure_dir "$host_outdir"
+  host_outdir_abs="$(cd "$host_outdir" && pwd -P)"
+
+  case "$KEYGEN_BACKEND" in
+    container)
+      local container_tmp_root="/tmp/filesend-keygen-${DATE_TAG}-$$-${mode}"
+      local container_outdir="${container_tmp_root}/out"
+
+      log "Generating ${mode} key material inside running container"
+      container_exec_sh "
+        set -eu
+        rm -rf \"$container_tmp_root\"
+        mkdir -p \"$container_outdir\"
+        cd \"$container_outdir\"
+        \"$FILESEND_BIN_IN_RUNTIME\" keygen \"--${mode}\"
+      "
+
+      docker cp "${FILESEND_CONTAINER_NAME}:${container_outdir}/." "$host_outdir_abs/" \
+        || die "Failed to copy generated ${mode} keys from container"
+
+      container_exec_sh "rm -rf \"$container_tmp_root\"" >/dev/null 2>&1 || true
+      ;;
+    image)
+      log "Generating ${mode} key material inside temporary container from image"
+      docker run --rm \
+        -v "${host_outdir_abs}:/out" \
+        --entrypoint sh \
+        "$FILESEND_IMAGE_NAME" \
+        -lc "
+          set -eu
+          cd /out
+          rm -f pr_key.bin pub_key.bin sym_key.bin
+          \"$FILESEND_BIN_IN_RUNTIME\" keygen \"--${mode}\"
+        " \
+        || die "Failed to generate ${mode} keys using image '$FILESEND_IMAGE_NAME'"
+      ;;
+    *)
+      die "Internal error: unknown keygen backend: $KEYGEN_BACKEND"
+      ;;
+  esac
 }
 
 generate_keys_material() {
-  ensure_filesend_binary
+  select_keygen_backend
   ensure_dir "keys"
-  ensure_dir ".tmp-keys"
 
-  local asym_tmp_dir=".tmp-keys/asymmetric-${DATE_TAG}"
-  local sym_tmp_dir=".tmp-keys/symmetric-${DATE_TAG}"
+  local host_tmp_root=".tmp-keys-${DATE_TAG}-$$"
+  local asym_tmp_dir="${host_tmp_root}/asymmetric"
+  local sym_tmp_dir="${host_tmp_root}/symmetric"
 
-  rm -rf "$asym_tmp_dir" "$sym_tmp_dir"
-  ensure_dir "$asym_tmp_dir"
-  ensure_dir "$sym_tmp_dir"
+  rm -rf -- "$host_tmp_root"
+  mkdir -p "$asym_tmp_dir" "$sym_tmp_dir"
 
-  generate_filesend_keys "asymmetric" "$asym_tmp_dir"
-  generate_filesend_keys "symmetric" "$sym_tmp_dir"
+  run_filesend_keygen "asymmetric" "$asym_tmp_dir"
+  run_filesend_keygen "symmetric" "$sym_tmp_dir"
 
   ASYM_PRIVATE_PATH_GEN="keys/pr_key-${DATE_TAG}.bin"
   ASYM_PUBLIC_PATH_GEN="keys/pub_key-${DATE_TAG}.bin"
@@ -369,7 +431,7 @@ generate_keys_material() {
   log "Created $ASYM_PUBLIC_PATH_GEN"
   log "Created $SYM_KEY_PATH_GEN"
 
-  rm -rf "$asym_tmp_dir" "$sym_tmp_dir"
+  rm -rf -- "$host_tmp_root"
 }
 
 generate_tls_material() {

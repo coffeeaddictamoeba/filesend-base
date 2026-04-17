@@ -58,7 +58,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    WORKDIR=/workspace
+    WORKDIR=/workspace \
+    SERVER_MODE=ws
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
@@ -69,12 +70,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #   libcurl4 # for HTTP
     && rm -rf /var/lib/apt/lists/*
 
+    # Change websockets to aiohttp if HTTPS
+RUN python -m pip install --upgrade pip \
+    && python -m pip install websockets
+
 RUN groupadd --gid "${USER_GID}" "${USER_NAME}" \
     && useradd --uid "${USER_UID}" --gid "${USER_GID}" --create-home --shell /bin/bash "${USER_NAME}"
 
 WORKDIR ${WORKDIR}
 
 COPY --from=builder /build/bin/filesend /opt/filesend/filesend
+COPY server/runserver_ws.py /opt/filesend/server/runserver_ws.py
+COPY server/runserver_https.py /opt/filesend/server/runserver_https.py
 COPY server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /opt/filesend/filesend /usr/local/bin/docker-entrypoint.sh
@@ -82,18 +89,6 @@ RUN chmod +x /opt/filesend/filesend /usr/local/bin/docker-entrypoint.sh
 USER ${USER_NAME}
 
 EXPOSE 8444
-
-# Entrypoint helps to configure all the security materials for testing,
-# including keys (symmetric & asymmetric (public/private)), server certificates, etc.
-
-# If sender device lacks security material, this is what should be copied:
-#    - server/certs/ca-cert-YYYY-MM-DD.pem
-#    - server/keys/pub_key-YYYY-MM-DD.bin (if asymmetric; do NOT copy the private key to sender)
-#    - server/keys/sym_key-YYYY-MM-DD.bin (if symmetric)
-# Everything else is for server's security
-
-# Set the proper values in filesend_config after copying
-# On the other hand, as server generates all the security material, it automatically substitutes the values into .env and server_config.
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["server"]
