@@ -24,24 +24,26 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 First, make these 2 files (`node-setup.sh` and `generate-configs.sh`) executable:
 
 ```bash
-chmod +x node-setup.sh generate-configs.sh
+chmod +x node-setup.sh generate-configs.sh generate-security.sh
 ```
 
-Second, run the `node-setup.sh` for single-device testing or for multiple devices setup:
+Second, run the `node-setup.sh` and `node-run.sh` for filesend app-server interaction testing for one or multiple devices:
 
 ```bash
-# to test on one device (sets up both filesend-server and filesend app, genrates security material)
-./node-setup.sh --one my_files/ setup.json
+# sets up both filesend-server and filesend app, genrates security material
+./node-setup.sh my_files/ setup.json
 
-# to test on multiple devices (sets up a filesend-server and generates a security material; app setup is expected to be on-device)
-./node-setup.sh --multiple my_files/ setup.json
+# adds a new device without modifying anything else
+./node-setup.sh my_files/ setup.json --add-device new_device_id
+
+# runs one server and multiple device-specific filesend apps 
+./node-run.sh my_files/ --devices my_device_1,my_device_2 setup.json
 
 ```
 
 Here `my_files/` is a directory with the files you want to send. The `filesend` runs in a **daemon mode** monitors this exact directory with **no timeout**.
 
-**NOTE:** If running `--one` mode please check this directory is inside the mounted folder (repo root, `filesend-base`).
-
+Check `my_files/` directory is inside the mounted device folder.
 
 The configuration defaults:
 
@@ -505,14 +507,9 @@ bin/./filesend encrypt mytemp.txt --symmetric|--asymmetric # try to encrypt the 
 
 ### Notes & Recommendations
 
-**NOTE:** `<path>` in `encrypt` and `decrypt` supports **pattern-based path definition** like `*.png `or `log_???.txt `. If you want to use a pattern instead of direct path, put your pattern in " " symbols: `filesend encrypt "*.png" --asymmetric --all`
+- `<path>` in `encrypt` and `decrypt` supports **pattern-based path definition** like `*.png `or `log_???.txt `. If you want to use a pattern instead of direct path, put your pattern in " " symbols: `filesend encrypt "*.png" --asymmetric --all`
 
-* `--all` enables encryption/decryption of **metadata** (mtime, mode, uid/gid).
-* URL  **must include `/upload`** , as the server expects this endpoint.
-* The hostname in the URL must match the certificate CN/SAN (e.g., `Test`, `localhost`).
-* Server *private key* **must never** be on the sending device – only the server should have it.
-* Asymmetric encryption is recommended for device - server communication (one-way encryption).
-* Symmetric encryption is recommended for local file storage or local pipelines.
+* HTTP URL **must include `/upload`** , as the server expects this endpoint.
 
 #### How to generate server key and certificate
 
@@ -520,7 +517,7 @@ bin/./filesend encrypt mytemp.txt --symmetric|--asymmetric # try to encrypt the 
 
 ```bash
 # CA private key
-openssl genrsa -out myCA.key 4096
+openssl genrsa -out ca.key 4096
 
 # CA self-signed certificate (root cert)
 openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 -out ca_cert.pem
