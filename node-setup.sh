@@ -50,6 +50,7 @@ ENCRYPT_MODE=""
 SERVER_HOST=""
 SERVER_PORT=""
 CONN_URL=""
+SERVER_RUNNER_NAME=""
 
 SERVER_WORKSPACE_ABS=""
 
@@ -57,14 +58,23 @@ GENERATE_CONFIGS_SCRIPT=""
 GENERATE_SECURITY_SCRIPT=""
 ROOT_FILESEND_CONFIG=""
 SERVER_CONFIG_PATH=""
-SERVER_CONFIG_MIRROR_PATH=""
+SERVER_TEMPLATE_DIR=""
+SERVER_ENV_PATH=""
+SERVER_RUNNER_PATH=""
 
 CRYPTO_ROOT=""
 ASYMM_ROOT=""
 SYMM_ROOT=""
+MODE_CRYPTO_ROOT=""
+MODE_CRYPTO_REL=""
 CA_DIR=""
 CLIENT_SERVER_CRYPTO_DIR=""
 DEVICES_ROOT=""
+SERVER_CONFIG_MIRROR_PATH=""
+SERVER_ENV_MIRROR_PATH=""
+SERVER_RUNNER_MIRROR_PATH=""
+SERVER_CERTS_MIRROR_DIR=""
+SERVER_KEYS_MIRROR_DIR=""
 
 ACTIVE_DATE_TAG=""
 ACTIVE_CA_SRC=""
@@ -434,17 +444,23 @@ copy_active_file_if_present() {
 }
 
 mirror_client_security_material() {
-  mkdir -p "$CA_DIR" "$CLIENT_SERVER_CRYPTO_DIR" "$SYMM_ROOT"
+  mkdir -p \
+    "$CA_DIR" \
+    "$CLIENT_SERVER_CRYPTO_DIR" \
+    "$SERVER_CERTS_MIRROR_DIR" \
+    "$SERVER_KEYS_MIRROR_DIR" \
+    "$SYMM_ROOT"
 
   copy_active_file_if_present "$ACTIVE_CA_SRC" "$CA_DIR"
+  copy_active_file_if_present "$ACTIVE_CA_SRC" "$SERVER_CERTS_MIRROR_DIR"
 
   case "$ENCRYPT_MODE" in
     asymm)
-      copy_active_file_if_present "$ACTIVE_PUB_SRC" "$CLIENT_SERVER_CRYPTO_DIR"
-      copy_active_file_if_present "$ACTIVE_PR_SRC" "$CLIENT_SERVER_CRYPTO_DIR"
+      copy_active_file_if_present "$ACTIVE_PUB_SRC" "$SERVER_KEYS_MIRROR_DIR"
+      copy_active_file_if_present "$ACTIVE_PR_SRC" "$SERVER_KEYS_MIRROR_DIR"
       ;;
     symm)
-      copy_active_file_if_present "$ACTIVE_SYM_SRC" "$SYMM_ROOT"
+      copy_active_file_if_present "$ACTIVE_SYM_SRC" "$SERVER_KEYS_MIRROR_DIR"
       ;;
   esac
 
@@ -460,8 +476,8 @@ apply_encrypt_mode_to_config() {
       set_config_value "$cfg" "mode" "asymmetric"
 
       if [[ "$scope" == "root" ]]; then
-        set_config_value "$cfg" "pub_key_path" "crypto/asymm/server/${ACTIVE_PUB_BASENAME}"
-        set_config_value "$cfg" "pr_key_path"  "crypto/asymm/server/${ACTIVE_PR_BASENAME}"
+        set_config_value "$cfg" "pub_key_path" "${MODE_CRYPTO_REL}/server/keys/${ACTIVE_PUB_BASENAME}"
+        set_config_value "$cfg" "pr_key_path"  "${MODE_CRYPTO_REL}/server/keys/${ACTIVE_PR_BASENAME}"
       elif [[ "$scope" == "device" ]]; then
         [[ -n "$device_dir" ]] || die "device_dir required for device crypto config"
         copy_active_file_if_present "$ACTIVE_PUB_SRC" "$device_dir"
@@ -477,7 +493,7 @@ apply_encrypt_mode_to_config() {
       set_config_value "$cfg" "mode" "symmetric"
 
       if [[ "$scope" == "root" ]]; then
-        set_config_value "$cfg" "sym_key_path" "crypto/symm/${ACTIVE_SYM_BASENAME}"
+        set_config_value "$cfg" "sym_key_path" "${MODE_CRYPTO_REL}/server/keys/${ACTIVE_SYM_BASENAME}"
       elif [[ "$scope" == "device" ]]; then
         [[ -n "$device_dir" ]] || die "device_dir required for device crypto config"
         copy_active_file_if_present "$ACTIVE_SYM_SRC" "$device_dir"
@@ -501,7 +517,7 @@ apply_encrypt_mode_to_config() {
 update_root_filesend_config() {
   [[ -f "$ROOT_FILESEND_CONFIG" ]] || die "Missing root filesend_config: $ROOT_FILESEND_CONFIG"
 
-  set_config_value "$ROOT_FILESEND_CONFIG" "cert_path" "crypto/asymm/CA/${ACTIVE_CA_BASENAME}"
+  set_config_value "$ROOT_FILESEND_CONFIG" "cert_path" "${MODE_CRYPTO_REL}/server/certs/${ACTIVE_CA_BASENAME}"
   apply_encrypt_mode_to_config "$ROOT_FILESEND_CONFIG" "root"
   set_config_value "$ROOT_FILESEND_CONFIG" "use_ws" "$([[ "$CONN_MODE" == "ws" ]] && echo true || echo false)"
   set_config_value "$ROOT_FILESEND_CONFIG" "url" "$CONN_URL"
@@ -514,10 +530,31 @@ update_generated_server_config() {
   set_config_value "$SERVER_CONFIG_PATH" "port" "$SERVER_PORT"
   set_config_value "$SERVER_CONFIG_PATH" "cert_path" "certs/${ACTIVE_SERVER_CERT_BASENAME}"
   set_config_value "$SERVER_CONFIG_PATH" "key_path"  "keys/${ACTIVE_SERVER_KEY_BASENAME}"
+}
 
-  mkdir -p "$(dirname "$SERVER_CONFIG_MIRROR_PATH")"
+mirror_server_runtime_bundle() {
+  [[ -f "$SERVER_CONFIG_PATH" ]] || die "Missing generated server config: $SERVER_CONFIG_PATH"
+
+  mkdir -p "$CLIENT_SERVER_CRYPTO_DIR" "$SERVER_CERTS_MIRROR_DIR" "$SERVER_KEYS_MIRROR_DIR"
+
   cp -f "$SERVER_CONFIG_PATH" "$SERVER_CONFIG_MIRROR_PATH"
-  log "Updated server config mirror: $SERVER_CONFIG_MIRROR_PATH"
+
+  if [[ -f "$SERVER_ENV_PATH" ]]; then
+    cp -f "$SERVER_ENV_PATH" "$SERVER_ENV_MIRROR_PATH"
+  else
+    warn "Optional server .env not found: $SERVER_ENV_PATH"
+  fi
+
+  if [[ -f "$SERVER_RUNNER_PATH" ]]; then
+    cp -f "$SERVER_RUNNER_PATH" "$SERVER_RUNNER_MIRROR_PATH"
+  else
+    warn "Expected server runner not found: $SERVER_RUNNER_PATH"
+  fi
+
+  copy_active_file_if_present "$ACTIVE_SERVER_CERT_SRC" "$SERVER_CERTS_MIRROR_DIR"
+  copy_active_file_if_present "$ACTIVE_SERVER_KEY_SRC" "$SERVER_KEYS_MIRROR_DIR"
+
+  log "Mirrored complete server runtime bundle into: $CLIENT_SERVER_CRYPTO_DIR"
 }
 
 normalize_incoming_subpath() {
@@ -613,6 +650,7 @@ load_config() {
   SERVER_HOST="$(extract_host_from_url "${CONN_URL_RAW:-0.0.0.0}")"
   SERVER_PORT="$(extract_port_from_url "${CONN_URL_RAW:-0.0.0.0}" "$CONN_MODE")"
   CONN_URL="$(resolve_filesend_url "$CONN_MODE" "${CONN_URL_RAW:-0.0.0.0}")"
+  SERVER_RUNNER_NAME="$([[ "$CONN_MODE" == "ws" ]] && echo "runserver_ws.py" || echo "runserver_https.py")"
 
   REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
   SERVER_WORKSPACE_ABS="$(cd "$REPO_ROOT/$SERVER_WORKSPACE_DIR" && pwd -P)"
@@ -622,21 +660,36 @@ load_config() {
 
   ROOT_FILESEND_CONFIG="$REPO_ROOT/filesend_config"
   SERVER_CONFIG_PATH="$REPO_ROOT/server/server_config"
+  SERVER_TEMPLATE_DIR="$(dirname "$SERVER_CONFIG_PATH")"
+  SERVER_ENV_PATH="$SERVER_TEMPLATE_DIR/.env"
+  SERVER_RUNNER_PATH="$SERVER_TEMPLATE_DIR/$SERVER_RUNNER_NAME"
 
   CRYPTO_ROOT="$REPO_ROOT/crypto"
   ASYMM_ROOT="$CRYPTO_ROOT/asymm"
   SYMM_ROOT="$CRYPTO_ROOT/symm"
-  CA_DIR="$ASYMM_ROOT/CA"
-  CLIENT_SERVER_CRYPTO_DIR="$ASYMM_ROOT/server"
+
+  case "$ENCRYPT_MODE" in
+    symm)
+      MODE_CRYPTO_ROOT="$SYMM_ROOT"
+      MODE_CRYPTO_REL="crypto/symm"
+      ;;
+    asymm|no)
+      MODE_CRYPTO_ROOT="$ASYMM_ROOT"
+      MODE_CRYPTO_REL="crypto/asymm"
+      ;;
+  esac
+
+  CA_DIR="$MODE_CRYPTO_ROOT/CA"
+  CLIENT_SERVER_CRYPTO_DIR="$MODE_CRYPTO_ROOT/server"
+  DEVICES_ROOT="$MODE_CRYPTO_ROOT/devices"
+
   SERVER_CONFIG_MIRROR_PATH="$CLIENT_SERVER_CRYPTO_DIR/server_config"
+  SERVER_ENV_MIRROR_PATH="$CLIENT_SERVER_CRYPTO_DIR/.env"
+  SERVER_RUNNER_MIRROR_PATH="$CLIENT_SERVER_CRYPTO_DIR/$SERVER_RUNNER_NAME"
+  SERVER_CERTS_MIRROR_DIR="$CLIENT_SERVER_CRYPTO_DIR/certs"
+  SERVER_KEYS_MIRROR_DIR="$CLIENT_SERVER_CRYPTO_DIR/keys"
 
-  if [[ "$ENCRYPT_MODE" == "symm" ]]; then
-    DEVICES_ROOT="$SYMM_ROOT/devices"
-  else
-    DEVICES_ROOT="$ASYMM_ROOT/devices"
-  fi
-
-  mkdir -p "$CA_DIR" "$CLIENT_SERVER_CRYPTO_DIR" "$SYMM_ROOT" "$DEVICES_ROOT"
+  mkdir -p "$CA_DIR" "$CLIENT_SERVER_CRYPTO_DIR" "$DEVICES_ROOT"
 }
 
 main() {
@@ -654,6 +707,7 @@ main() {
   mirror_client_security_material
   update_root_filesend_config
   update_generated_server_config
+  mirror_server_runtime_bundle
   prepare_devices "$incoming_subpath"
 }
 

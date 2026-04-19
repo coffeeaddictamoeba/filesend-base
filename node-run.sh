@@ -16,10 +16,10 @@ Usage:
   $SCRIPT_NAME <incoming_dir> --devices <id1> [config.json]
 
 Behavior:
-  - Starts the server container
+  - Starts the server container from crypto/<mode>/server
   - Runs one app container per selected device
-  - Each app container sends from:
-      crypto/asymm/devices/<device_id>/<incoming_dir>
+  - Runs app containers from:
+      crypto/<mode>/devices/<device_id>/<incoming_dir>
 
 Notes:
   - Devices and security material must already be prepared by node-setup.sh
@@ -57,10 +57,16 @@ APP_IMAGE=""
 APP_CONTAINER_NAME=""
 APP_WORKSPACE_DIR=""
 APP_NETWORK=""
+APP_ENCRYPT_RAW=""
+
+ENCRYPT_MODE=""
+MODE_CRYPTO_REL=""
+MODE_CRYPTO_ROOT=""
+SERVER_RUNTIME_DIR=""
+DEVICES_ROOT=""
 
 SERVER_WORKSPACE_ABS=""
 APP_WORKSPACE_ABS=""
-DEVICES_ROOT=""
 
 SELECTED_DEVICES=()
 
@@ -125,6 +131,17 @@ for part in dotted.split("."):
 
 print(cur if isinstance(cur, str) else "")
 PY
+}
+
+normalize_encrypt_mode() {
+  local mode
+  mode="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  case "$mode" in
+    ""|asymm|asymmetric) printf '%s\n' "asymm" ;;
+    symm|symmetric)      printf '%s\n' "symm" ;;
+    no|none|off)         printf '%s\n' "no" ;;
+    *) die "Unsupported app.encrypt: $1" ;;
+  esac
 }
 
 container_exists() {
@@ -192,6 +209,7 @@ load_config() {
   APP_CONTAINER_NAME="$(json_get "app.container_name")"
   APP_WORKSPACE_DIR="$(json_get "app.workspace_dir")"
   APP_NETWORK="$(json_get "app.network")"
+  APP_ENCRYPT_RAW="$(json_get "app.encrypt")"
 
   SERVER_DOCKERFILE="${SERVER_DOCKERFILE:-Dockerfile.server}"
   SERVER_IMAGE="${SERVER_IMAGE:-filesend-server-dev}"
@@ -204,10 +222,36 @@ load_config() {
   APP_WORKSPACE_DIR="${APP_WORKSPACE_DIR:-.}"
   APP_NETWORK="${APP_NETWORK:-host}"
 
+  ENCRYPT_MODE="$(normalize_encrypt_mode "${APP_ENCRYPT_RAW:-asymm}")"
+
   REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
   SERVER_WORKSPACE_ABS="$(cd "$REPO_ROOT/$SERVER_WORKSPACE_DIR" && pwd)"
   APP_WORKSPACE_ABS="$(cd "$REPO_ROOT/$APP_WORKSPACE_DIR" && pwd)"
-  DEVICES_ROOT="$REPO_ROOT/crypto/asymm/devices"
+
+  case "$ENCRYPT_MODE" in
+    symm)
+      MODE_CRYPTO_REL="crypto/symm"
+      MODE_CRYPTO_ROOT="$REPO_ROOT/crypto/symm"
+      ;;
+    asymm|no)
+      MODE_CRYPTO_REL="crypto/asymm"
+      MODE_CRYPTO_ROOT="$REPO_ROOT/crypto/asymm"
+      ;;
+  esac
+
+  SERVER_RUNTIME_DIR="$MODE_CRYPTO_ROOT/server"
+  DEVICES_ROOT="$MODE_CRYPTO_ROOT/devices"
+}
+
+ensure_server_runtime_dir() {
+  [[ -d "$SERVER_RUNTIME_DIR" ]] || die "Prepared server runtime dir not found: $SERVER_RUNTIME_DIR"
+  [[ -f "$SERVER_RUNTIME_DIR/server_config" ]] || die "Missing mirrored server config: $SERVER_RUNTIME_DIR/server_config"
+
+  if [[ -n "${SERVER_MODE_ENV:-}" ]]; then
+    local runner_name
+    runner_name="$([[ "${SERVER_MODE_ENV,,}" == "ws" ]] && echo "runserver_ws.py" || echo "runserver_https.py")"
+    [[ -f "$SERVER_RUNTIME_DIR/$runner_name" ]] || warn "Expected runner not found in runtime dir: $SERVER_RUNTIME_DIR/$runner_name"
+  fi
 }
 
 ensure_server_ready() {
@@ -215,15 +259,29 @@ ensure_server_ready() {
     docker_build "$SERVER_IMAGE" "$SERVER_DOCKERFILE" USER_UID USER_GID
   fi
 
+  ensure_server_runtime_dir
   remove_container_if_exists "$SERVER_CONTAINER_NAME"
 
   log "Starting server container: $SERVER_CONTAINER_NAME"
-  docker run -d \
-    --name "$SERVER_CONTAINER_NAME" \
-    -p "$SERVER_PORT_MAP" \
-    -v "$SERVER_WORKSPACE_ABS:/workspace" \
-    -e "SERVER_MODE=$SERVER_MODE_ENV" \
-    "$SERVER_IMAGE" >/dev/null
+  log "Using server runtime dir: $SERVER_RUNTIME_DIR"
+
+  local docker_args=(
+    run -d
+    --name "$SERVER_CONTAINER_NAME"
+    -p "$SERVER_PORT_MAP"
+    -v "$SERVER_RUNTIME_DIR:/workspace"
+    -w /workspace
+    -e "WORKDIR=/workspace"
+    -e "SERVER_MODE=$SERVER_MODE_ENV"
+  )
+
+  if [[ -f "$SERVER_RUNTIME_DIR/.env" ]]; then
+    log "Found runtime .env at: $SERVER_RUNTIME_DIR/.env"
+  fi
+
+  docker_args+=("$SERVER_IMAGE")
+
+  docker "${docker_args[@]}" >/dev/null
 
   sleep 5
 
@@ -250,7 +308,7 @@ run_app_for_device() {
   local device_id="$1"
   local incoming_subpath="$2"
   local device_dir="$DEVICES_ROOT/$device_id"
-  local incoming_container_path="/workspace/crypto/asymm/devices/${device_id}/${incoming_subpath}"
+  local incoming_container_path="/workspace/${incoming_subpath}"
   local container_name="${APP_CONTAINER_NAME}-${device_id}"
 
   [[ -d "$device_dir" ]] || die "Device directory not found: $device_dir"
@@ -260,13 +318,14 @@ run_app_for_device() {
   remove_container_if_exists "$container_name"
 
   log "Running app container for device: $device_id"
+  log "Using device dir bind mount: $device_dir -> /workspace"
   log "Command: filesend send $incoming_container_path"
 
   docker run -d \
     --name "$container_name" \
     --user "$(id -u):$(id -g)" \
     --network="$APP_NETWORK" \
-    -v "$APP_WORKSPACE_ABS:/workspace" \
+    -v "$device_dir:/workspace" \
     -w /workspace \
     "$APP_IMAGE" \
     filesend send "$incoming_container_path" >/dev/null
@@ -288,6 +347,10 @@ Server container:
   name: $SERVER_CONTAINER_NAME
   image: $SERVER_IMAGE
   status: $(container_running "$SERVER_CONTAINER_NAME" && echo running || echo stopped)
+  workspace: $SERVER_RUNTIME_DIR
+
+Crypto mode:
+  $ENCRYPT_MODE
 
 Selected devices:
 $(for d in "${SELECTED_DEVICES[@]}"; do printf '  - %s\n' "$d"; done)

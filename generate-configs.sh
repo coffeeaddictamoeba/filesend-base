@@ -74,7 +74,7 @@ cert_path = certs/server-date.crt
 key_path = keys/server-date.key
 
 [filesend]
-bin_path = bin/filesend
+bin_path = filesend
 decrypt_timeout_s = 60
 
 [logging]

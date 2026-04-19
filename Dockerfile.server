@@ -79,12 +79,12 @@ RUN groupadd --gid "${USER_GID}" "${USER_NAME}" \
 
 WORKDIR ${WORKDIR}
 
-COPY --from=builder /build/bin/filesend /opt/filesend/filesend
+COPY --from=builder /build/bin/filesend /usr/local/bin/filesend
 COPY server/runserver_ws.py /opt/filesend/server/runserver_ws.py
 COPY server/runserver_https.py /opt/filesend/server/runserver_https.py
 COPY server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN chmod +x /opt/filesend/filesend /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/filesend /usr/local/bin/docker-entrypoint.sh
 
 USER ${USER_NAME}
 

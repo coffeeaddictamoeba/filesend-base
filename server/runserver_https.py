@@ -45,7 +45,7 @@ from aiohttp import web
 # Defaults
 FILESEND_SERVER_CONFIG: str = "server_config"
 
-FILESEND_BIN_PATH: str = "bin/filesend"
+FILESEND_BIN_PATH: str = "filesend"
 FILESEND_INCOMING_DIR: str = "incoming"
 FILESEND_DECRYPTED_DIR: str = "decrypted"
 FILESEND_TOKENS_JSON: str = "device_tokens.json" # {"pi":"token", ...}
