@@ -358,6 +358,8 @@ bool FileSender::send_files_from_path_mt(const fs::path& p, int nthreads = MAX_W
 bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::seconds timeout, int nthreads = MAX_WORKERS_MT) {
     DbFlushGuard guard(db_);
 
+    std::mutex process_mtx;
+
     if (fs::is_regular_file(inbox)) {
         const TempDirsConfig dc(inbox.parent_path());
         bool ok = process_and_send_one_file(inbox, sender_.get_policy(), dc, nullptr);
@@ -438,8 +440,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
             auto mark_failed_and_finish = [&](const fs::path& p) {
                 had_error = true;
                 if (!rename_successful(p, dc.failed_dir / p.filename())) {
-                    std::error_code ec;
-                    fs::remove(p, ec);
+                    fprintf(stderr, RED "[ERROR] Failed to move %s to failed dir\n" RESET, p.c_str());
                 }
                 finish_qe_item();
             };
@@ -452,6 +453,8 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
 
                 if (!rename_successful(claimed, mine)) {
                     // Can't take ownership; just finish qe item
+                    fprintf(stderr, RED "[WARN] Failed to move claimed file %s to worker dir %s\n" RESET,
+            claimed.c_str(), mine.c_str());
                     finish_qe_item();
                     continue;
                 }
@@ -481,17 +484,20 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                     worker_batches[i].clear();
                     
                     fs::path out;
-                    if (!process_one_file(archive, out, policy, dc, nullptr)) {
-                        had_error = true;
-                        if (!out.empty()) {
-                            std::error_code ec;
-                            fs::remove(out, ec);
+                    {
+                        std::lock_guard<std::mutex> lk(process_mtx);
+                        if (!process_one_file(archive, out, policy, dc, nullptr)) {
+                            had_error = true;
+                            if (!out.empty()) {
+                                std::error_code ec;
+                                fs::remove(out, ec);
+                            }
+                            if (!rename_successful(archive, dc.failed_dir / archive.filename())) {
+                                std::error_code ec;
+                                fs::remove(archive, ec);
+                            }
+                            continue;
                         }
-                        if (!rename_successful(archive, dc.failed_dir / archive.filename())) {
-                            std::error_code ec;
-                            fs::remove(archive, ec);
-                        }
-                        continue;
                     }
 
                     enqueue_send(out);
@@ -501,9 +507,12 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                 // Single-file
                 {
                     fs::path out;
-                    if (!process_one_file(mine, out, policy, dc, nullptr)) {
-                        mark_failed_and_finish(mine);
-                        continue;
+                    {
+                        std::lock_guard<std::mutex> lk(process_mtx);
+                        if (!process_one_file(mine, out, policy, dc, nullptr)) {
+                            mark_failed_and_finish(mine);
+                            continue;
+                        }
                     }
 
                     finish_qe_item();

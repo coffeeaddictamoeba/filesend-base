@@ -104,6 +104,11 @@ int load_or_create_symmetric_key(const char* key_path, unsigned char* key, size_
 }
 
 int create_asymmetric_key_pair(const char* pub_key_path, const char* pr_key_path, unsigned char* pub_key, size_t pub_key_len) {
+    if (!pub_key || pub_key_len != crypto_box_PUBLICKEYBYTES) {
+        fprintf(stderr, RED "[ERROR] Invalid public key buffer size\n" RESET);
+        return -1;
+    }
+
     unsigned char pr_key[crypto_box_SECRETKEYBYTES];
 
     crypto_box_keypair(pub_key, pr_key);
@@ -130,6 +135,8 @@ int create_asymmetric_key_pair(const char* pub_key_path, const char* pr_key_path
         );
         return -1;
     }
+
+    sodium_memzero(pr_key, sizeof(pr_key));
 
     return 0;
 }
