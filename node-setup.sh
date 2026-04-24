@@ -12,9 +12,17 @@ trap 'ec=$?; (( ec == 0 )) || warn "Script failed with exit code $ec."' EXIT
 usage() {
   cat <<EOF
 Usage:
-  $SCRIPT_NAME <incoming_dir> [config.json] [--force[=all|server|devices]]
-  $SCRIPT_NAME <incoming_dir> [config.json] --devices <id1,id2,...> [--force[=all|server|devices]]
-  $SCRIPT_NAME <incoming_dir> [config.json] --add-device <id> [--force[=all|server|devices]]
+  $SCRIPT_NAME [--json <setup.json>] [--force[=all|server|security|app|devices|a,b,...]]
+  $SCRIPT_NAME [--json <setup.json>] --devices <id1,id2,...> [--force[=all|server|security|app|devices|a,b,...]]
+  $SCRIPT_NAME [--json <setup.json>] --add-device <id> [--force[=all|server|security|app|devices|a,b,...]]
+
+Defaults:
+  --json setup.json
+
+Notes:
+  - incoming_dir is read from the JSON key: incoming_dir
+  - --force without a value is the same as --force=all
+  - --force supports comma-separated values, for example: --force=app,devices
 EOF
 }
 
@@ -26,11 +34,16 @@ for cmd in docker python3 grep sed find cp mkdir chmod id rm dirname basename pw
   require_cmd "$cmd"
 done
 
-INCOMING_DIR=""
 CONFIG_FILE="setup.json"
-FORCE_MODE=""
 DEVICE_SELECTION_RAW=""
 ADD_DEVICE_ID=""
+
+FORCE_SERVER=0
+FORCE_SECURITY=0
+FORCE_APP=0
+FORCE_DEVICES=0
+
+INCOMING_DIR=""
 
 REPO_ROOT=""
 SERVER_DOCKERFILE=""
@@ -94,17 +107,48 @@ ACTIVE_SERVER_KEY_BASENAME=""
 DEVICES=()
 SELECTED_DEVICES=()
 
+parse_force_modes() {
+  local raw="${1:-all}"
+  local item normalized
+  IFS=',' read -r -a _force_items <<< "$raw"
+
+  [[ ${#_force_items[@]} -gt 0 ]] || die "Invalid --force value: $raw"
+
+  for item in "${_force_items[@]}"; do
+    normalized="$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]')"
+    normalized="${normalized//[[:space:]]/}"
+    [[ -n "$normalized" ]] || die "Invalid empty value in --force=$raw"
+
+    case "$normalized" in
+      all)
+        FORCE_SERVER=1
+        FORCE_SECURITY=1
+        FORCE_APP=1
+        FORCE_DEVICES=1
+        ;;
+      server)   FORCE_SERVER=1 ;;
+      security) FORCE_SECURITY=1 ;;
+      app)      FORCE_APP=1 ;;
+      devices)  FORCE_DEVICES=1 ;;
+      *) die "Invalid --force value: $normalized" ;;
+    esac
+  done
+}
+
 parse_args() {
-  [[ $# -ge 1 ]] || { usage; exit 1; }
-
-  INCOMING_DIR="$1"
-  shift
-
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      *.json) CONFIG_FILE="$1" ;;
-      --force) FORCE_MODE="all" ;;
-      --force=*) FORCE_MODE="${1#--force=}" ;;
+      --json)
+        shift
+        [[ $# -gt 0 ]] || die "--json requires a value"
+        CONFIG_FILE="$1"
+        ;;
+      --force)
+        parse_force_modes "all"
+        ;;
+      --force=*)
+        parse_force_modes "${1#--force=}"
+        ;;
       --devices)
         shift
         [[ $# -gt 0 ]] || die "--devices requires a value"
@@ -119,6 +163,9 @@ parse_args() {
         usage
         exit 0
         ;;
+      *.json)
+        die "Positional config file is no longer supported. Use --json <config.json>"
+        ;;
       *)
         die "Unknown argument: $1"
         ;;
@@ -126,20 +173,15 @@ parse_args() {
     shift
   done
 
-  [[ -n "$INCOMING_DIR" ]] || die "Incoming directory must not be empty."
   [[ -f "$CONFIG_FILE" ]] || die "Config file not found: $CONFIG_FILE"
-
-  case "$FORCE_MODE" in
-    ""|all|server|devices) ;;
-    *) die "Invalid --force value: $FORCE_MODE" ;;
-  esac
-
   [[ -z "$DEVICE_SELECTION_RAW" || -z "$ADD_DEVICE_ID" ]] || die "Use either --devices or --add-device, not both."
 }
 
-should_force_all()     { [[ "$FORCE_MODE" == "all" ]]; }
-should_force_server()  { [[ "$FORCE_MODE" == "all" || "$FORCE_MODE" == "server" ]]; }
-should_force_devices() { [[ "$FORCE_MODE" == "all" || "$FORCE_MODE" == "devices" ]]; }
+should_force_all()      { [[ $FORCE_SERVER -eq 1 && $FORCE_SECURITY -eq 1 && $FORCE_APP -eq 1 && $FORCE_DEVICES -eq 1 ]]; }
+should_force_server()   { [[ $FORCE_SERVER   -eq 1 ]]; }
+should_force_security() { [[ $FORCE_SECURITY -eq 1 ]]; }
+should_force_app()      { [[ $FORCE_APP      -eq 1 ]]; }
+should_force_devices()  { [[ $FORCE_DEVICES  -eq 1 ]]; }
 
 json_get() {
   local path="$1"
@@ -336,7 +378,7 @@ ensure_server_images() {
     log "Reusing existing server image: $SERVER_IMAGE"
   fi
 
-  if should_force_all || ! image_exists "$APP_IMAGE"; then
+  if should_force_app || ! image_exists "$APP_IMAGE"; then
     docker_build "$APP_IMAGE" "$APP_DOCKERFILE" USER_ID GROUP_ID
   else
     log "Reusing existing app image: $APP_IMAGE"
@@ -348,7 +390,7 @@ ensure_security_material() {
   chmod +x "$GENERATE_SECURITY_SCRIPT"
 
   local args=(. --image "$SERVER_IMAGE")
-  if should_force_server; then
+  if should_force_security; then
     args+=(--force=all)
   fi
 
@@ -621,6 +663,9 @@ prepare_devices() {
 load_config() {
   REPO_ROOT="$(json_get "repo_root")"
   REPO_ROOT="${REPO_ROOT:-.}"
+
+  INCOMING_DIR="$(json_get "incoming_dir")"
+  [[ -n "$INCOMING_DIR" ]] || die "Missing required JSON key: incoming_dir"
 
   SERVER_DOCKERFILE="$(json_get "server.dockerfile")"
   SERVER_IMAGE="$(json_get "server.image")"

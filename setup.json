@@ -22,6 +22,7 @@
     "mode": "ws",
     "url": "0.0.0.0:8444"
   },
+  "incoming_dir": "incoming",
   "devices": [
     { "id": "device_1" },
     { "id": "device_2" }
