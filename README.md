@@ -21,29 +21,37 @@ This code provides basic tools for fast, lightweight and secure file sending fro
 
 **NOTE:** The only dependency needed for default and advanced setup is Docker.
 
-First, make these 2 files (`node-setup.sh` and `generate-configs.sh`) executable:
+First, make these files executable:
 
 ```bash
-chmod +x node-setup.sh generate-configs.sh generate-security.sh
+chmod +x node-setup.sh generate-configs.sh generate-security.sh device-node-run.sh server-node-run.sh
 ```
 
-Second, run the `node-setup.sh` and `node-run.sh` for filesend app-server interaction testing for one or multiple devices:
+Second, run the `node-setup.sh` and `*_node-run.sh` for filesend app-server interaction testing for one or multiple devices:
 
 ```bash
 # sets up both filesend-server and filesend app, genrates security material
-./node-setup.sh my_files/ setup.json
+./node-setup.sh
 
 # adds a new device without modifying anything else
-./node-setup.sh my_files/ setup.json --add-device new_device_id
+./node-setup.sh --add-device new_device_id
 
-# runs one server and multiple device-specific filesend apps 
-./node-run.sh my_files/ --devices my_device_1,my_device_2 setup.json
+# run the server
+./server-node-run.sh
+
+# run the device(-s)
+./device-node-run.sh --devices device_id_1,device_id_2
+
+# add one more running device
+./device-node-run.sh --add-device new_device_id
+# NOTE: new_device_id device directory should exist and contain all the necessary
+# security material and configs. To create a new device, use node-setup.sh with --add-device option
 
 ```
 
-Here `my_files/` is a directory with the files you want to send. The `filesend` runs in a **daemon mode** monitors this exact directory with **no timeout**.
+The name of directory for incoming files on devices (`incoming/` by default) can be configured by `setup.json `as well as the most of the running settings. 
 
-Check `my_files/` directory is inside the mounted device folder.
+The `filesend` runs in a **daemon mode** monitors this exact directory with **no timeout**.
 
 The configuration defaults:
 
@@ -51,6 +59,8 @@ The configuration defaults:
 - All the necessary security material (server key, server certificate, encryption keys) is generated and configs (`filesend_config` and `server/server_config`) are updated accordingly
 - Server starts **automatically**
 - Default configuration is **WebSocket connection**, **TLS via CA certificate** and **asymmetric cryptosystem** for file contents encryption (all settings for `node-setup.sh`-based setup are in `setup.json` file)
+
+**NOTE:** Testing the workflow may require [`filesend encrypt`](#mode-encrypt), [`filesend decrypt`](#mode-decrypt) and [`filesend keygen`](#mode-keygen) modes explained below as `filesend` can be not compatible with other security tools.
 
 ## Advanced Setup
 
@@ -394,7 +404,7 @@ filesend send --ws logs "ws://0.0.0.0:8444/ws" --encrypt asymmetric --all --time
 
 ---
 
-Encrypts a file locally.
+[Encrypts a file locally.](#mode-encrypt)
 
 ```
 filesend encrypt <path> [--symmetric|--asymmetric] [--all] [--dest <file>][--force]
@@ -431,7 +441,7 @@ filesend encrypt raw/data.bin --symmetric --all
 
 ---
 
-Decrypts a file previously encrypted with `filesend`. Can be used on server side.
+[Decrypts a file previously encrypted with `filesend`. Can be used on server side.](#mode-decrypt)
 
 ```
 filesend decrypt <file> [--symmetric|--asymmetric] [--all] [--dest <file>][--force]
@@ -484,11 +494,11 @@ Verifies file's SHA-256 (both raw and hex formats). Can be used on server side.
 
 ---
 
+[Creates a key/keypair suitable for encryption/decryption.](#mode-keygen)
+
 ```
 filesend keygen [--symmetric|--asymmetric]
 ```
-
-Creates a key/keypair suitable for encryption/decryption.
 
 You do not need anything to run it (for example, sourcing `.env` or setting the `filesend_config`). The warnings about using default fields (e.g. `[WARN] No KEY_PATH found in environment. Using default: my_key.bin`) can be safely ignored.
 
