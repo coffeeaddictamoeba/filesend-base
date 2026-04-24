@@ -468,6 +468,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                             had_error = true;
                             if (!rename_successful(archive, dc.failed_dir / archive.filename())) {
                                 std::error_code ec;
+                                fprintf(stderr, RED "[ERROR] Failed to move to failed: %s\n" RESET, archive.filename().c_str());
                                 fs::remove(archive, ec);
                             }
                         }
@@ -490,10 +491,12 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                             had_error = true;
                             if (!out.empty()) {
                                 std::error_code ec;
+                                fprintf(stderr, RED "[ERROR] Failed to move to failed: %s\n" RESET, archive.filename().c_str());
                                 fs::remove(out, ec);
                             }
                             if (!rename_successful(archive, dc.failed_dir / archive.filename())) {
                                 std::error_code ec;
+                                fprintf(stderr, RED "[ERROR] Failed to move to failed: %s\n" RESET, archive.filename().c_str());
                                 fs::remove(archive, ec);
                             }
                             continue;
@@ -540,6 +543,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                         if (!archive.empty()) {
                             if (!rename_successful(archive, dc.failed_dir / archive.filename())) {
                                 std::error_code ec;
+                                fprintf(stderr, RED "[ERROR] Failed to move to failed: %s\n" RESET, archive.filename().c_str());
                                 fs::remove(archive, ec);
                             }
                         }
@@ -556,6 +560,7 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
                             }
                             if (!rename_successful(archive, dc.failed_dir / archive.filename())) {
                                 std::error_code ec;
+                                fprintf(stderr, RED "[ERROR] Failed to move to failed: %s\n" RESET, archive.filename().c_str());
                                 fs::remove(archive, ec);
                             }
                             return;
@@ -674,7 +679,10 @@ bool FileSender::send_files_from_path_mt(const fs::path& inbox, std::chrono::sec
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
     } else {
-        for (;;) std::this_thread::sleep_for(std::chrono::seconds(1));
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            db_->flush(); // save all 
+        }
     }
 
     // Shutdown

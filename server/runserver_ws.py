@@ -185,31 +185,63 @@ def db_init(db_path: Path) -> None:
     finally:
         conn.close()
 
-def db_check_and_touch(db_path: Path, sha256_hex: str, enc_path: str, dec_path: str) -> Tuple[bool, int]:
+def db_check_and_touch(
+    db_path: Path,
+    sha256_hex: str,
+    enc_path: str,
+    dec_path: str,
+) -> Tuple[bool, int, Optional[Dict[str, Any]]]:
     ts = now_utc_compact()
     conn = sqlite3.connect(db_path)
     try:
-        cur = conn.execute("SELECT count FROM files WHERE sha256 = ?", (sha256_hex,))
+        cur = conn.execute(
+            """
+            SELECT count, first_seen_utc, last_seen_utc, last_enc_path, last_dec_path
+            FROM files
+            WHERE sha256 = ?
+            """,
+            (sha256_hex,),
+        )
         row = cur.fetchone()
+
         if row:
-            count = int(row[0]) + 1
+            old_count, first_seen, last_seen, old_enc_path, old_dec_path = row
+            count = int(old_count) + 1
+
+            dup_info = {
+                "previous_count": int(old_count),
+                "new_count": count,
+                "first_seen_utc": first_seen,
+                "previous_last_seen_utc": last_seen,
+                "previous_enc_path": old_enc_path,
+                "previous_dec_path": old_dec_path,
+            }
+
             conn.execute(
-                "UPDATE files SET last_seen_utc=?, count=?, last_enc_path=?, last_dec_path=? WHERE sha256=?",
+                """
+                UPDATE files
+                SET last_seen_utc=?, count=?, last_enc_path=?, last_dec_path=?
+                WHERE sha256=?
+                """,
                 (ts, count, enc_path, dec_path, sha256_hex),
             )
             conn.commit()
-            return True, count
-        else:
-            conn.execute(
-                "INSERT INTO files(sha256, first_seen_utc, last_seen_utc, count, last_enc_path, last_dec_path) "
-                "VALUES(?,?,?,?,?,?)",
-                (sha256_hex, ts, ts, 1, enc_path, dec_path),
+            return True, count, dup_info
+
+        conn.execute(
+            """
+            INSERT INTO files(
+                sha256, first_seen_utc, last_seen_utc, count, last_enc_path, last_dec_path
             )
-            conn.commit()
-            return False, 1
+            VALUES(?,?,?,?,?,?)
+            """,
+            (sha256_hex, ts, ts, 1, enc_path, dec_path),
+        )
+        conn.commit()
+        return False, 1, None
+
     finally:
         conn.close()
-
 
 # Auth
 def load_tokens(token_file: Optional[Path]) -> Dict[str, str]:
@@ -421,11 +453,31 @@ async def handle_client(ws, cfg: ServerConfig, logger: logging.Logger, tokens: D
 
                         is_dup = False
                         dup_count = 1
+                        dup_info = None
+
                         if cfg.enable_dedup:
-                            is_dup, dup_count = db_check_and_touch(
-                                cfg.dedup_db, actual_sha,
-                                str(state.enc_final_path), str(state.dec_final_path)
+                            is_dup, dup_count, dup_info = db_check_and_touch(
+                                cfg.dedup_db,
+                                actual_sha,
+                                str(state.enc_final_path),
+                                str(state.dec_final_path),
                             )
+
+                            if is_dup:
+                                logger.warning(
+                                    "%s | DUPLICATE_FILE sha256=%s new_enc=%s new_dec=%s "
+                                    "new_count=%d first_seen=%s previous_last_seen=%s "
+                                    "previous_enc=%s previous_dec=%s",
+                                    ctx,
+                                    actual_sha,
+                                    state.enc_final_path,
+                                    state.dec_final_path,
+                                    dup_count,
+                                    dup_info.get("first_seen_utc") if dup_info else None,
+                                    dup_info.get("previous_last_seen_utc") if dup_info else None,
+                                    dup_info.get("previous_enc_path") if dup_info else None,
+                                    dup_info.get("previous_dec_path") if dup_info else None,
+                                )
 
                         logger.info(
                             "%s | file_done bytes=%d sha256=%s decrypted=%s dedup=%s count=%d",
@@ -440,6 +492,7 @@ async def handle_client(ws, cfg: ServerConfig, logger: logging.Logger, tokens: D
                             "sha256": actual_sha,
                             "dedup": bool(is_dup),
                             "dedup_count": int(dup_count),
+                            "dedup_info": dup_info,
                         })
 
                     except subprocess.TimeoutExpired:
